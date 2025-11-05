@@ -49,6 +49,7 @@ main {
     display: flex;
     background-color: var(--secondary-bg);
     border-bottom: 1px solid var(--border-color);
+    justify-content: flex-start;
 }
 
 #tabs button {
@@ -64,6 +65,11 @@ main {
 #tabs button.active {
     border-bottom-color: var(--accent-color);
     font-weight: bold;
+}
+
+#tabs #split-view-btn {
+    margin-left: auto;
+    border-left: 1px solid var(--border-color);
 }
 
 #content-area {
@@ -84,6 +90,27 @@ main {
 
 .content-view.active {
     display: flex;
+}
+
+/* --- Split View Styles --- */
+main.split-view-active #content-area {
+    display: flex;
+    flex-direction: row;
+}
+
+main.split-view-active .content-view {
+    display: flex;
+    position: relative;
+    width: 50%;
+    height: 100%;
+    border-left: 1px solid var(--border-color);
+}
+
+main.split-view-active #code-view {
+    border-left: none;
+}
+main.split-view-active #diagram-view {
+    background-color: var(--secondary-bg);
 }
 
 /* Code View */
@@ -132,6 +159,29 @@ main {
     outline: none;
     background-color: var(--secondary-bg);
     color: var(--text-color);
+}
+
+/* Diagram Toolbar (for split view) */
+#diagram-toolbar {
+    display: none; /* Hidden by default */
+    padding: 0.5rem;
+    background-color: var(--secondary-bg);
+    border-bottom: 1px solid var(--border-color);
+    text-align: right;
+}
+
+#diagram-toolbar #render-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--accent-color);
+    color: white;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+main.split-view-active #diagram-toolbar {
+    display: block;
 }
 
 /* Diagram View */

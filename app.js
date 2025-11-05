@@ -14,6 +14,8 @@ const diagramView = document.getElementById('diagram-view');
 const codeEditor = document.getElementById('code-editor');
 const diagramContainer = document.getElementById('diagram-container');
 const fileInfo = document.getElementById('file-info');
+const splitViewBtn = document.getElementById('split-view-btn');
+const renderBtn = document.getElementById('render-btn');
 
 // --- IndexedDB Module ---
 const db = {
@@ -109,6 +111,12 @@ async function renderMermaid() {
     try {
         const { svg } = await mermaid.render('mermaid-graph', code);
         diagramContainer.innerHTML = svg;
+        // In split view, re-apply theme to the new SVG
+        if (document.body.classList.contains('dark-mode')) {
+            mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+        } else {
+            mermaid.initialize({ startOnLoad: false, theme: 'default' });
+        }
     } catch (error) {
         diagramContainer.innerHTML = `<pre style="color: red;">${error.message}</pre>`;
     }
@@ -116,6 +124,11 @@ async function renderMermaid() {
 
 // Tab Switching
 function switchTab(targetTab) {
+    // Disable tab switching if in split view
+    if (document.querySelector('main').classList.contains('split-view-active')) {
+        return;
+    }
+
     if (targetTab === 'diagram') {
         codeTab.classList.remove('active');
         codeView.classList.remove('active');
@@ -136,6 +149,45 @@ function switchTab(targetTab) {
 
 codeTab.addEventListener('click', () => switchTab('code'));
 diagramTab.addEventListener('click', () => switchTab('diagram'));
+
+// --- Split View Logic ---
+splitViewBtn.addEventListener('click', () => {
+    const main = document.querySelector('main');
+    const isSplit = main.classList.toggle('split-view-active');
+    splitViewBtn.classList.toggle('active');
+
+    if (isSplit) {
+        // --- ENTER SPLIT VIEW ---
+        // Show both views
+        codeView.classList.add('active');
+        diagramView.classList.add('active');
+
+        // Disable single-view tabs
+        codeTab.setAttribute('disabled', 'true');
+        diagramTab.setAttribute('disabled', 'true');
+
+        // Initial render
+        renderMermaid();
+
+    } else {
+        // --- EXIT SPLIT VIEW ---
+        // The render button will be hidden by CSS, no need to remove listener
+        // as it will have no effect outside of split view.
+        // If we had added a listener to codeEditor, we would remove it here:
+        // codeEditor.removeEventListener('input', renderMermaid);
+        
+        // Re-enable single-view tabs
+        codeTab.removeAttribute('disabled');
+        diagramTab.removeAttribute('disabled');
+
+        // Restore single tab view (default to code view)
+        diagramView.classList.remove('active');
+        switchTab('code');
+    }
+});
+
+// The new render button only works in split view.
+renderBtn.addEventListener('click', renderMermaid);
 
 // --- Save Logic ---
 async function saveCurrentDiagram() {
