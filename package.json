@@ -1,0 +1,9 @@
+{
+  "name": "mermaid-ide",
+  "version": "1.0.0",
+  "description": "A project-based Mermaid IDE",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/run-all-tests.js"
+  }
+}

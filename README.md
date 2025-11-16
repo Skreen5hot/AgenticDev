@@ -1,8 +1,8 @@
 # mermaid
 
-## Mermaid Syntax Viewer & Editor (v1.0)
+## Mermaid Project IDE (v2.0)
 
-A lightweight, browser-based tool for viewing, editing, and storing Mermaid diagrams locally. It allows users to switch between Mermaid code and rendered diagram views, and persist models in IndexedDB as JSON-LD.
+A lightweight, browser-based IDE for creating, organizing, and managing Mermaid diagrams within projects. It allows users to switch between Mermaid code and rendered diagram views, and persist models in IndexedDB.
 
 ### File Structure
 
@@ -27,14 +27,16 @@ Because this application uses modern JavaScript Modules (`import`/`export`), it 
 
 ### Features
 
-*   **Code Editor**: Write and edit your Mermaid syntax.
-*   **Diagram Viewer**: Instantly render your Mermaid code into a visual diagram.
-*   **Local Storage**: All diagrams are saved securely in your browser's IndexedDB.
-*   **File Management**:
-    *   Create **New** diagrams.
-    *   **Open** existing diagrams from storage.
-    *   **Save** your work.
-    *   **Delete** diagrams you no longer need.
-*   **JSON-LD Support**:
-    *   **Export** your diagrams as `.jsonld` files for semantic data interoperability.
-    *   **Import** `.jsonld` files to add them to your local collection.
+*   **Project-Based Organization**: Group your diagrams into distinct projects for better management.
+*   **Side-Panel Navigation**: Quickly switch between diagrams within a project using a collapsible side menu with thumbnail previews.
+*   **Code Editor & Diagram Viewer**: A split-pane view to write Mermaid syntax and see the rendered diagram in real-time.
+*   **Bulk Operations**:
+    *   **Upload**: Add multiple `.mmd` files to a project at once.
+    *   **Download**: Export an entire project as a `.zip` file containing all its diagrams.
+*   **Local Storage**: All projects and diagrams are saved securely in your browser's IndexedDB. No cloud account needed.
+*   **Individual File Management**:
+    *   Create, save, and delete individual diagrams.
+    *   Export a single diagram as a `.mmd` file.
+*   **Legacy Support**:
+    *   Export diagrams as `.jsonld` files for semantic data interoperability.
+    *   Import `.jsonld` files to add them to your local collection.

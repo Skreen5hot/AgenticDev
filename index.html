@@ -4,41 +4,72 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mermaid Syntax Viewer & Editor</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="styles/style.css">
 </head>
 <body>
 
-<header>Mermaid Syntax Viewer & Editor</header>
+<header>
+    <span>Mermaid Project IDE</span>
+    <div class="theme-switch-container">
+        <label for="theme-toggle" class="theme-switch">
+            <input type="checkbox" id="theme-toggle">
+            <span class="slider"></span>
+        </label>
+    </div>
+</header>
 
 <main>
-    <section id="tabs">
-        <button id="code-tab" class="active" role="tab" aria-selected="true">Code</button>
-        <button id="diagram-tab" role="tab" aria-selected="false">Diagram</button>
-        <button id="split-view-btn">Split</button>
-    </section>
-
-    <section id="content-area">
-        <div id="code-view" class="content-view active">
-            <div id="toolbar">
-                <button id="new-btn">New</button>
-                <button id="open-btn">Open</button>
-                <button id="save-btn">Save</button>
-                <button id="delete-btn">Delete</button>
-                <button id="export-btn">Export JSON-LD</button>
-                <label for="import-file-input" id="import-label">Import JSON-LD</label>
-                <input type="file" id="import-file-input" accept=".jsonld">
-            </div>
-            <div id="file-info">No file open.</div>
-            <textarea id="code-editor" placeholder="graph TD; A-->B;"></textarea>
+    <aside id="project-sidebar">
+        <div id="sidebar-header">
+            <h3>Projects</h3>
         </div>
-
-        <div id="diagram-view" class="content-view">
-            <div id="diagram-toolbar">
-                <button id="render-btn">Render</button>
-            </div>
-            <div id="diagram-container"></div>
+        <div id="project-selector-container">
+            <select id="project-selector"></select>
+            <button id="new-project-btn" title="New Project">+</button>
+            <button id="delete-project-btn" title="Delete Project">🗑️</button>
         </div>
-    </section>
+        <ul id="diagram-list">
+            <!-- Diagram list items will be populated by JS -->
+        </ul>
+        <div id="sidebar-footer">
+            <label for="upload-diagrams-input" class="sidebar-btn">Upload .mmd</label>
+            <input type="file" id="upload-diagrams-input" accept=".mmd" multiple hidden>
+            <button id="download-project-btn" class="sidebar-btn">Download .zip</button>
+        </div>
+    </aside>
+
+    <div id="main-content">
+        <button id="sidebar-toggle-btn" title="Toggle Sidebar">‹</button>
+        <section id="tabs">
+            <button id="code-tab" class="active" role="tab" aria-selected="true">Code</button>
+            <button id="diagram-tab" role="tab" aria-selected="false">Diagram</button>
+            <button id="split-view-btn">Split</button>
+        </section>
+
+        <section id="content-area">
+            <div id="code-view" class="content-view active">
+                <div id="toolbar">
+                    <button id="new-btn">New</button>
+                    <button id="save-btn">Save</button>
+                    <button id="delete-btn">Delete</button>
+                    <button id="rename-btn">Rename</button>
+                <button id="export-mmd-btn">Export .mmd</button>
+                    <button id="export-btn">Export JSON-LD</button>
+                    <label for="import-file-input" id="import-label">Import JSON-LD</label>
+                    <input type="file" id="import-file-input" accept=".jsonld">
+                </div>
+                <div id="file-info">No file open.</div>
+                <textarea id="code-editor" placeholder="graph TD; A-->B;"></textarea>
+            </div>
+
+            <div id="diagram-view" class="content-view">
+                <div id="diagram-toolbar">
+                    <button id="render-btn">Render</button>
+                </div>
+                <div id="diagram-container"></div>
+            </div>
+        </section>
+    </div>
 </main>
 
 <footer>Version 1.0</footer>
@@ -49,11 +80,6 @@
         <h2>New Diagram</h2>
         <label for="new-name">Name:</label>
         <input type="text" id="new-name" required>
-        <label for="new-directory">Directory:</label>
-        <select id="new-directory">
-            <option value="Models">Models</option>
-            <option value="Processes">Processes</option>
-        </select>
         <div class="modal-buttons">
             <button id="new-cancel-btn">Cancel</button>
             <button id="new-create-btn">Create</button>
@@ -61,25 +87,13 @@
     </div>
 </div>
 
-<!-- Open Diagram Modal -->
-<div id="open-modal" class="modal">
-    <div class="modal-content">
-        <h2>Open Diagram</h2>
-        <h3>Models</h3>
-        <select id="open-models-select">
-        </select>
-        <h3>Processes</h3>
-        <select id="open-processes-select">
-        </select>
-        <div class="modal-buttons">
-            <button id="open-cancel-btn">Cancel</button>
-            <button id="open-confirm-btn">Open</button>
-        </div>
-    </div>
-</div>
-
 <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-<script src="app.js" type="module" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- <script src="app.js" type="module" defer></script> -->
+<script type="module">
+    import { initializeApp } from './src/synchronizations.js';
+    initializeApp();
+</script>
 
 </body>
 </html>
