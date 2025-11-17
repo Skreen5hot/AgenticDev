@@ -2,7 +2,7 @@
 
 import path from 'path';
 import fs from 'fs';
-import { TestRunner } from './tests/framework/test-runner.js';
+import TestRunner from './tests/framework/test-runner.js';
 
 const testsDir = './tests';
 
