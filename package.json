@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "PWA Task Manager application",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "node run-all-tests.js",
     "security-check": "npm audit --audit-level=high",
