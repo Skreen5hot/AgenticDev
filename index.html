@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mermaid Syntax Viewer & Editor</title>
-    <link rel="stylesheet" href="css/normalize.min.css">
-    <link rel="stylesheet" href="css/skeleton.css">
+    <link rel="stylesheet" href="styles/normalize.min.css">
+    <link rel="stylesheet" href="styles/skeleton.css">
     <link rel="stylesheet" href="styles/style.css">
 </head>
 <body>
@@ -58,7 +58,7 @@
                 <button id="export-mmd-btn">Export .mmd</button>
                     <button id="export-btn">Export JSON-LD</button>
                     <label for="import-file-input" id="import-label">Import JSON-LD</label>
-                    <input type="file" id="import-file-input" accept=".jsonld">
+                    <input type="file" id="import-file-input" accept=".jsonld" hidden>
                 </div>
                 <div id="file-info">No file open.</div>
                 <textarea id="code-editor" placeholder="graph TD; A-->B;"></textarea>
