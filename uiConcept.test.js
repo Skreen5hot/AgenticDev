@@ -14,13 +14,11 @@ describe('uiConcept.js', () => {
         // inject these mock elements into the concept for testing purposes.
         // This is a common pattern for testing UI components in isolation.
         uiConcept.setTestElements({
-            saveDiagramBtn: mockSaveBtn,
-            deleteDiagramBtn: mockDeleteBtn,
-            renameDiagramBtn: mockRenameBtn,
+            saveDiagramBtn: mockSaveBtn, deleteDiagramBtn: mockDeleteBtn, renameDiagramBtn: mockRenameBtn,
         });
     });
 
-    it('should DISABLE buttons when currentDiagram has no ID (initial state)', () => {
+    it('should ENABLE Save but DISABLE others when currentDiagram has no ID (unsaved state)', () => {
         // This simulates the initial "unsaved" diagram state.
         const unsavedDiagram = { id: null, name: '', content: 'graph TD; A-->B;' };
 
@@ -28,11 +26,12 @@ describe('uiConcept.js', () => {
         uiConcept.listen('updateButtonStates', { currentDiagram: unsavedDiagram });
 
         // Retrieve the mock elements to check their state.
-        const { saveDiagramBtn, deleteDiagramBtn } = uiConcept.getTestElements();
+        const { saveDiagramBtn, deleteDiagramBtn, renameDiagramBtn } = uiConcept.getTestElements();
 
         // Assert that the 'disabled' property was set to true.
-        assert.strictEqual(saveDiagramBtn.disabled, true, 'Save button should be disabled for new diagrams');
+        assert.strictEqual(saveDiagramBtn.disabled, false, 'Save button should be enabled for new diagrams to trigger save-as');
         assert.strictEqual(deleteDiagramBtn.disabled, true, 'Delete button should be disabled for new diagrams');
+        assert.strictEqual(renameDiagramBtn.disabled, true, 'Rename button should be disabled for new diagrams');
     });
 
     it('should ENABLE buttons when currentDiagram has an ID (saved state)', () => {
@@ -43,11 +42,12 @@ describe('uiConcept.js', () => {
         uiConcept.listen('updateButtonStates', { currentDiagram: savedDiagram });
 
         // Retrieve the mock elements.
-        const { saveDiagramBtn, deleteDiagramBtn } = uiConcept.getTestElements();
+        const { saveDiagramBtn, deleteDiagramBtn, renameDiagramBtn } = uiConcept.getTestElements();
 
         // Assert that the 'disabled' property was set to false.
         assert.strictEqual(saveDiagramBtn.disabled, false, 'Save button should be enabled for saved diagrams');
         assert.strictEqual(deleteDiagramBtn.disabled, false, 'Delete button should be enabled for saved diagrams');
+        assert.strictEqual(renameDiagramBtn.disabled, false, 'Rename button should be enabled for saved diagrams');
     });
 
 });

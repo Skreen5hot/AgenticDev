@@ -81,7 +81,8 @@ diagramConcept.subscribe((event, payload) => {
         const projectState = projectConcept.getState();
         const currentProject = projectState.projects.find(p => p.id === projectState.currentProjectId);
 
-        uiConcept.listen('renderEditor', { content: payload.diagram?.content || 'graph TD;\n  A-->B;' });
+        // When no diagram is loaded, the editor should be empty to show the placeholder.
+        uiConcept.listen('renderEditor', { content: payload.diagram?.content ?? '' });
         uiConcept.listen('renderFileInfo', {
             projectName: currentProject?.name,
             diagramName: payload.diagram?.name || '',
@@ -89,7 +90,8 @@ diagramConcept.subscribe((event, payload) => {
         // When content is loaded, update button states. A diagram being loaded means they should be enabled.
         // If payload.diagram is null, it means no diagram is active, so they should be disabled.
         uiConcept.listen('updateButtonStates', { currentDiagram: payload.diagram });
-        const initialContent = payload.diagram?.content || 'graph TD;\n  A-->B;';
+        // When no diagram is loaded, show a helpful message in the diagram view.
+        const initialContent = payload.diagram?.content || 'graph TD\n  A["Create a new diagram or select one from the list"];';
         uiConcept.listen('renderMermaidDiagram', { content: initialContent });
 
     }
@@ -156,16 +158,8 @@ uiConcept.subscribe((event, payload) => {
         }
     }
     if (event === 'ui:exportMmdClicked') {
-        const { currentDiagram } = diagramConcept.getState();
-        if (currentDiagram) {
-            uiConcept.listen('downloadFile', {
-                filename: `${currentDiagram.name}.mmd`,
-                content: currentDiagram.content,
-                mimeType: 'text/plain;charset=utf-8'
-            });
-        } else {
-            alert("Please open a diagram to export.");
-        }
+        // This logic is now handled in diagramConcept.js
+        diagramConcept.listen('exportCurrentDiagramAsMmd');
     }
     if (event === 'ui:exportJsonLdClicked') {
         const { currentDiagram } = diagramConcept.getState();

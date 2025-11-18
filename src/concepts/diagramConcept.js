@@ -48,20 +48,24 @@ function _setCurrentDiagram({ diagramId }) {
         bus.notify('do:loadDiagram', { diagramId });
     } else {
         // This case handles when no diagram is selected, creating the unsaved state.
-        _initializeUnsavedDiagram({ content: 'graph TD;\n  A-->B;' });
+        _initializeUnsavedDiagram({ content: '' });
     }
 }
 
 function _handleDiagramLoaded(diagram) {
     state.currentDiagram = diagram;
     bus.notify('diagramContentLoaded', { diagram });
+    // After a diagram is loaded, it becomes the "current" one.
+    // We need to notify the UI to re-render the list to show the new active item.
+    // We re-use the 'diagramsUpdated' event for this, as the UI is already wired to it.
+    bus.notify('diagramsUpdated', { diagrams: state.diagrams, currentDiagramId: state.currentDiagram?.id });
 }
 
 function _createDiagram({ name, projectId }) {
     const newDiagramData = {
         name,
         projectId,
-        content: 'graph TD;\n  A-->B;',
+        content: 'graph TD;\n  A-->B;', // New diagrams start with some default content.
     };
     bus.notify('do:saveDiagram', { diagramData: newDiagramData });
 }
@@ -87,6 +91,21 @@ function _saveCurrentDiagram() {
     }
 }
 
+function _exportCurrentDiagramAsMmd() {
+    const { currentDiagram } = state;
+    if (currentDiagram) {
+        bus.notify('do:downloadFile', {
+            filename: `${currentDiagram.name || 'diagram'}.mmd`,
+            content: currentDiagram.content,
+            mimeType: 'text/plain;charset=utf-8'
+        });
+    } else {
+        // In a real app, you might want to notify the UI to show a message.
+        // For now, we'll just log it.
+        console.warn('Export MMD ignored: No current diagram.');
+    }
+}
+
 function _renameDiagram({ diagramId, newName }) {
     const diagramToRename = state.diagrams.find(d => d.id === diagramId);
     if (diagramToRename) {
@@ -109,11 +128,8 @@ function _updateCurrentDiagramContent({ content }) {
 
 function _handleDiagramSaved(savedDiagram) {
     // After saving, the most reliable way to update the UI is to reload everything for the current project.
-    // This avoids complex state management and ensures consistency.
+    // This avoids complex state management, especially when batch-importing, and ensures consistency.
     _loadDiagrams({ projectId: savedDiagram.projectId });
-    // After saving, we should reload the list to get the latest state
-    // And then select the diagram that was just saved.
-    _setCurrentDiagram({ diagramId: savedDiagram.id });
 }
 
 function _handleDiagramDeleted({ diagramId }) {
@@ -152,6 +168,7 @@ const actions = {
     'saveCurrentDiagram': _saveCurrentDiagram,
     'renameDiagram': _renameDiagram,
     'deleteDiagram': _deleteDiagram,
+    'exportCurrentDiagramAsMmd': _exportCurrentDiagramAsMmd,
     'updateCurrentDiagramContent': _updateCurrentDiagramContent,
     'debouncedUpdateCurrentDiagramContent': debounce(_updateCurrentDiagramContent, 300),
     'handleDiagramSaved': _handleDiagramSaved,

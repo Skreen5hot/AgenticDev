@@ -7,43 +7,10 @@ let codeTab, diagramTab, codeView, diagramView, codeEditor, diagramContainer,
     fileInfo, splitViewBtn, projectSidebar, sidebarToggleBtn, projectSelector,
     diagramList, themeToggle, newProjectBtn, deleteProjectBtn, newDiagramBtn,
     saveDiagramBtn, deleteDiagramBtn, renameDiagramBtn, newModal, newNameInput,
-    newCancelBtn, newCreateBtn, uploadInput, downloadBtn, exportMmdBtn,
-    exportJsonLdBtn, importJsonLdInput, importJsonLdLabel;
+    newCancelBtn, newCreateBtn, downloadBtn, exportMmdBtn;
 
 let isSplitView = false;
 let isInitialized = false;
-
-function _populateElements() {
-    codeTab = document.getElementById('code-tab');
-    diagramTab = document.getElementById('diagram-tab');
-    codeView = document.getElementById('code-view');
-    diagramView = document.getElementById('diagram-view');
-    codeEditor = document.getElementById('code-editor');
-    diagramContainer = document.getElementById('diagram-container');
-    fileInfo = document.getElementById('file-info');
-    splitViewBtn = document.getElementById('split-view-btn');
-    projectSidebar = document.getElementById('project-sidebar');
-    sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
-    projectSelector = document.getElementById('project-selector');
-    diagramList = document.getElementById('diagram-list');
-    themeToggle = document.getElementById('theme-toggle');
-    newProjectBtn = document.getElementById('new-project-btn');
-    deleteProjectBtn = document.getElementById('delete-project-btn');
-    newDiagramBtn = document.getElementById('new-btn');
-    saveDiagramBtn = document.getElementById('save-btn');
-    deleteDiagramBtn = document.getElementById('delete-btn');
-    renameDiagramBtn = document.getElementById('rename-btn');
-    newModal = document.getElementById('new-modal');
-    newNameInput = document.getElementById('new-name');
-    newCancelBtn = document.getElementById('new-cancel-btn');
-    newCreateBtn = document.getElementById('new-create-btn');
-    uploadInput = document.getElementById('upload-diagrams-input');
-    downloadBtn = document.getElementById('download-project-btn');
-    exportMmdBtn = document.getElementById('export-mmd-btn');
-    exportJsonLdBtn = document.getElementById('export-btn');
-    importJsonLdInput = document.getElementById('import-file-input');
-    importJsonLdLabel = document.getElementById('import-label');
-}
 
 // --- Private Functions ---
 
@@ -222,16 +189,16 @@ function _hideNewDiagramModal() {
 
 function _updateButtonStates({ currentDiagram }) {
     // A diagram is considered "active" for saving/deleting/renaming only if it has an ID.
-    // This keeps the buttons disabled for the initial "unsaved" diagram state.
+    // The save button is an exception: it should be enabled for unsaved diagrams to trigger the save-as flow.
     console.log('[UI] Updating button states based on diagram:', currentDiagram);
 
-    const isDiagramActive = !!currentDiagram?.id;
-    console.log(`[UI] Diagram has an ID? ${isDiagramActive}. Setting disabled to: ${!isDiagramActive}`);
+    const hasActiveDiagram = !!currentDiagram;
+    const isSavedDiagram = !!currentDiagram?.id;
 
     if (saveDiagramBtn) {
-        saveDiagramBtn.disabled = !isDiagramActive;
-        deleteDiagramBtn.disabled = !isDiagramActive;
-        renameDiagramBtn.disabled = !isDiagramActive;
+        saveDiagramBtn.disabled = !hasActiveDiagram; // Enable for any diagram, saved or not.
+        deleteDiagramBtn.disabled = !isSavedDiagram; // Only enable for saved diagrams.
+        renameDiagramBtn.disabled = !isSavedDiagram; // Only enable for saved diagrams.
     } else {
         // This log helps catch initialization errors.
         console.error('[UI] Could not find toolbar buttons to update their state.');
@@ -312,10 +279,6 @@ function _attachEventListeners() {
     exportMmdBtn.addEventListener('click', () => {
         bus.notify('ui:exportMmdClicked');
     });
-
-    exportJsonLdBtn.addEventListener('click', () => {
-        bus.notify('ui:exportJsonLdClicked');
-    });
 }
 
 // --- Public Actions ---
@@ -334,20 +297,36 @@ const actions = {
     'updateButtonStates': _updateButtonStates,
     'hideNewDiagramModal': _hideNewDiagramModal,
     'initialize': () => {
-        // Test-only helpers
-        if (typeof window === 'undefined') { // Running in Node.js for tests
-            actions.setTestElements = (elements) => {
-                saveDiagramBtn = elements.saveDiagramBtn;
-                deleteDiagramBtn = elements.deleteDiagramBtn;
-                renameDiagramBtn = elements.renameDiagramBtn;
-            };
-            actions.getTestElements = () => ({ saveDiagramBtn, deleteDiagramBtn, renameDiagramBtn });
-        }
-
         // Prevent multiple initializations
         if (isInitialized || typeof document === 'undefined') return;
 
-        _populateElements();
+        // Populate elements from the document
+        codeTab = document.getElementById('code-tab');
+        diagramTab = document.getElementById('diagram-tab');
+        codeView = document.getElementById('code-view');
+        diagramView = document.getElementById('diagram-view');
+        codeEditor = document.getElementById('code-editor');
+        diagramContainer = document.getElementById('diagram-container');
+        fileInfo = document.getElementById('file-info');
+        splitViewBtn = document.getElementById('split-view-btn');
+        projectSidebar = document.getElementById('project-sidebar');
+        sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+        projectSelector = document.getElementById('project-selector');
+        diagramList = document.getElementById('diagram-list');
+        themeToggle = document.getElementById('theme-toggle');
+        newProjectBtn = document.getElementById('new-project-btn');
+        deleteProjectBtn = document.getElementById('delete-project-btn');
+        newDiagramBtn = document.getElementById('new-btn');
+        saveDiagramBtn = document.getElementById('save-btn');
+        deleteDiagramBtn = document.getElementById('delete-btn');
+        renameDiagramBtn = document.getElementById('rename-btn');
+        newModal = document.getElementById('new-modal');
+        newNameInput = document.getElementById('new-name');
+        newCancelBtn = document.getElementById('new-cancel-btn');
+        newCreateBtn = document.getElementById('new-create-btn');
+        downloadBtn = document.getElementById('download-project-btn');
+        exportMmdBtn = document.getElementById('export-mmd-btn');
+
         _attachEventListeners();
         _initializeTheme();
         isInitialized = true;
@@ -355,6 +334,17 @@ const actions = {
     'reset': () => {
         isSplitView = false;
         isInitialized = false;
+    },
+    // --- Test-only methods ---
+    setTestElements: (elements) => {
+        saveDiagramBtn = elements.saveDiagramBtn;
+        deleteDiagramBtn = elements.deleteDiagramBtn;
+        renameDiagramBtn = elements.renameDiagramBtn;
+        // Add other elements as needed for tests
+    },
+    getTestElements: () => {
+        // Expose elements for assertions in tests
+        return { saveDiagramBtn, deleteDiagramBtn, renameDiagramBtn };
     }
 };
 
@@ -365,6 +355,10 @@ export const uiConcept = {
     listen(event, payload) {
         if (actions[event]) {
             actions[event](payload);
+        } else if (event === 'setTestElements' || event === 'getTestElements') {
+            // Allow test methods to be called via listen for convenience
+            // This is a pattern to avoid exporting them on the main object.
+            return actionsevent;
         }
     }
 };

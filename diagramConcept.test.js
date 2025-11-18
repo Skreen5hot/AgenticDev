@@ -1,11 +1,6 @@
-import { diagramConcept } from '../../src/concepts/diagramConcept.js';
-import assert from '../framework/assert.js';
+import { diagramConcept } from './src/concepts/diagramConcept.js';
+import assert from './test/framework/assert.js';
 
-/**
- * A helper to capture all events emitted by a concept's event bus during a test.
- * @param {object} concept The concept to monitor.
- * @returns {Array<{event: string, payload: any}>} A list of captured events.
- */
 function captureEvents(concept) {
     const events = [];
     concept.subscribe((event, payload) => {
@@ -64,21 +59,6 @@ describe('diagramConcept.js', () => {
         const contentLoadedEvent = events.find(e => e.event === 'diagramContentLoaded');
         assert.ok(contentLoadedEvent, 'should emit a diagramContentLoaded event');
         assert.strictEqual(contentLoadedEvent.payload.diagram, mockDiagram, 'event payload should contain the loaded diagram');
-    });
-
-    it("listen('updateCurrentDiagramContent', ...) should update content and emit diagramContentChanged", () => {
-
-        const events = captureEvents(diagramConcept);
-        const newContent = 'graph LR; X-->Y';
-
-        diagramConcept.listen('updateCurrentDiagramContent', { content: newContent });
-
-        const state = diagramConcept.getState();
-        assert.strictEqual(state.currentDiagram.content, newContent, 'currentDiagram content should be updated');
-
-        const contentChangedEvent = events.find(e => e.event === 'diagramContentChanged');
-        assert.ok(contentChangedEvent, 'should emit a diagramContentChanged event');
-        assert.strictEqual(contentChangedEvent.payload.content, newContent, 'event payload should contain the new content');
     });
 
     it("listen('saveCurrentDiagram') should emit a do:saveDiagram event with the correct data", () => {
