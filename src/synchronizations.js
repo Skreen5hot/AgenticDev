@@ -2,6 +2,7 @@ import { storageConcept } from './concepts/storageConcept.js';
 import { projectConcept } from './concepts/projectConcept.js';
 import { diagramConcept } from './concepts/diagramConcept.js';
 import { uiConcept } from './concepts/uiConcept.js';
+import { tracer } from './utils/tracer.js';
 
 // --- Synchronization Rules ---
 
@@ -81,6 +82,7 @@ diagramConcept.subscribe((event, payload) => {
     // --- Diagram -> UI ---
     if (event === 'diagramsUpdated') {
         uiConcept.listen('renderDiagramList', payload);
+        tracer.endTrace(); // End the trace after the final UI update is triggered.
     }
     if (event === 'do:showNewDiagramModal') {
         uiConcept.listen('showNewDiagramModal');

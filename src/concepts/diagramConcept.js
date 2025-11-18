@@ -1,4 +1,5 @@
 import { createEventBus } from '../utils/eventBus.js';
+import { tracer } from '../utils/tracer.js';
 
 const bus = createEventBus();
 
@@ -65,6 +66,7 @@ function _setCurrentDiagram({ diagramId }) {
 
 function _handleDiagramLoaded(diagram) {
     state.currentDiagram = diagram;
+    tracer.logStep('DiagramConcept: Diagram data loaded from storage');
     bus.notify('diagramContentLoaded', { diagram });
     // After a diagram is loaded, it becomes the "current" one.
     // We need to notify the UI to re-render the list to show the new active item.

@@ -1,4 +1,5 @@
 import { createEventBus } from '../utils/eventBus.js';
+import { tracer } from '../utils/tracer.js';
 
 const bus = createEventBus();
 
@@ -104,6 +105,9 @@ function _renderDiagramList({ diagrams, currentDiagramId }) {
 
     // 2. Asynchronously render each thumbnail, allowing the UI to remain responsive.
     diagrams.forEach(d => _renderSingleThumbnail(d));
+
+    // Log the end of the list rendering process
+    tracer.logStep('UI: Finished rendering diagram list placeholders');
 }
 
 function _renderEditor({ content }) {
@@ -163,6 +167,7 @@ function _attachEventListeners() {
 
     elements['diagram-list']?.addEventListener('click', (e) => {
         if (e.target.tagName === 'LI') {
+            tracer.startTrace('Select Diagram');
             bus.notify('ui:diagramSelected', { diagramId: parseInt(e.target.dataset.diagramId, 10) });
         }
     });
