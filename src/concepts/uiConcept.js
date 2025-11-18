@@ -66,32 +66,44 @@ function _renderProjectSelector({ projects, currentProjectId }) {
         .join('');
 }
 
-async function _renderDiagramList({ diagrams, currentDiagramId }) {
+async function _renderSingleThumbnail(diagram) {
+    const thumbnailContainer = document.getElementById(`thumbnail-container-${diagram.id}`);
+    if (!thumbnailContainer) return;
+
+    let thumbnailSvg = '';
+    try {
+        await mermaid.parse(diagram.content || 'graph TD; A(( ))');
+        const { svg } = await mermaid.render(`thumbnail-${diagram.id}-${Date.now()}`, diagram.content || 'graph TD; A(( ))');
+        thumbnailSvg = svg;
+    } catch (e) {
+        thumbnailSvg = '<div class="thumbnail-error">Invalid Syntax</div>';
+    }
+    thumbnailContainer.innerHTML = thumbnailSvg;
+}
+
+function _renderDiagramList({ diagrams, currentDiagramId }) {
     if (!elements['diagram-list']) return;
 
     if (!diagrams || diagrams.length === 0) {
         elements['diagram-list'].innerHTML = '<li class="no-diagrams">No diagrams in this project.</li>';
         return;
     }
-
-    const listItemsHtml = await Promise.all(diagrams.map(async (d) => {
-        let thumbnailSvg = '';
-        try {
-            // Ensure valid syntax before rendering to avoid errors
-            await mermaid.parse(d.content || 'graph TD; A(( ))');
-            const { svg } = await mermaid.render(`thumbnail-${d.id}-${Date.now()}`, d.content || 'graph TD; A(( ))');
-            thumbnailSvg = svg;
-        } catch (e) {
-            thumbnailSvg = '<div class="thumbnail-error">Invalid Syntax</div>';
-        }
-
-        return `<li data-diagram-id="${d.id}" class="${d.id === currentDiagramId ? 'active' : ''}">
-                    <div class="diagram-thumbnail">${thumbnailSvg}</div>
+    
+    // 1. Render the list immediately with placeholders
+    const listItemsHtml = diagrams.map(d => {
+        const isActive = d.id === currentDiagramId ? 'active' : '';
+        return `<li data-diagram-id="${d.id}" class="${isActive}">
+                    <div class="diagram-thumbnail" id="thumbnail-container-${d.id}">
+                        <div class="thumbnail-loader"></div>
+                    </div>
                     <span class="diagram-name">${d.name}</span>
                 </li>`;
-    }));
+    }).join('');
 
-    elements['diagram-list'].innerHTML = listItemsHtml.join('');
+    elements['diagram-list'].innerHTML = listItemsHtml;
+
+    // 2. Asynchronously render each thumbnail, allowing the UI to remain responsive.
+    diagrams.forEach(d => _renderSingleThumbnail(d));
 }
 
 function _renderEditor({ content }) {
