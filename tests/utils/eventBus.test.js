@@ -1,57 +1,51 @@
 import { createEventBus } from '../../src/utils/eventBus.js';
-import assert from '../framework/assert.js';
+import { describe, it } from '../test-helpers.js';
+import assert from '../../src/assert.js';
 
-describe('eventBus.js', () => {
-    it('should return an object with subscribe and notify methods', () => {
-        const bus = createEventBus();
-        assert.ok(bus, 'The event bus object should be created');
-        assert.strictEqual(typeof bus.subscribe, 'function', 'bus.subscribe should be a function');
-        assert.strictEqual(typeof bus.notify, 'function', 'bus.notify should be a function');
+describe('Event Bus', () => {
+  it('should create an event bus with subscribe and notify methods', () => {
+    const bus = createEventBus();
+    assert.ok(bus.subscribe, 'Bus should have a subscribe method');
+    assert.ok(bus.notify, 'Bus should have a notify method');
+  });
+
+  it('should allow a subscriber to receive a notification', () => {
+    const bus = createEventBus();
+    let receivedEvent = null;
+    let receivedPayload = null;
+
+    bus.subscribe((event, payload) => {
+      receivedEvent = event;
+      receivedPayload = payload;
     });
 
-    it('should call a subscribed callback on notification with correct arguments', () => {
-        const bus = createEventBus();
-        let wasCalled = false;
-        let receivedEvent = null;
-        let receivedPayload = null;
-        const testPayload = { data: 'hello' };
+    bus.notify('testEvent', { data: 'hello' });
 
-        bus.subscribe((event, payload) => {
-            wasCalled = true;
-            receivedEvent = event;
-            receivedPayload = payload;
-        });
+    assert.strictEqual(receivedEvent, 'testEvent', 'Should receive the correct event name');
+    assert.strictEqual(receivedPayload.data, 'hello', 'Should receive the correct payload');
+  });
 
-        bus.notify('test-event', testPayload);
+  it('should notify all subscribers', () => {
+    const bus = createEventBus();
+    let sub1Called = false;
+    let sub2Called = false;
 
-        assert.ok(wasCalled, 'The subscriber function should have been called');
-        assert.strictEqual(receivedEvent, 'test-event', 'The event name should be correct');
-        assert.strictEqual(receivedPayload, testPayload, 'The payload should be correct');
-    });
+    bus.subscribe(() => (sub1Called = true));
+    bus.subscribe(() => (sub2Called = true));
 
-    it('should call all registered subscribers when notified', () => {
-        const bus = createEventBus();
-        let callCount = 0;
+    bus.notify('someEvent');
 
-        bus.subscribe(() => { callCount++; });
-        bus.subscribe(() => { callCount++; });
-        bus.subscribe(() => { callCount++; });
+    assert.ok(sub1Called, 'First subscriber should be called');
+    assert.ok(sub2Called, 'Second subscriber should be called');
+  });
 
-        bus.notify('multi-subscriber-event');
+  it('should isolate events between different bus instances', () => {
+    const bus1 = createEventBus();
+    const bus2 = createEventBus();
+    let bus2SubscriberCalled = false;
 
-        assert.strictEqual(callCount, 3, 'All three subscribers should have been called');
-    });
-
-    it('should keep bus instances isolated from each other', () => {
-        const bus1 = createEventBus();
-        const bus2 = createEventBus();
-        let bus1WasCalled = false;
-
-        bus1.subscribe(() => { bus1WasCalled = true; });
-        bus2.subscribe(() => { assert.fail('Subscriber on bus2 should not be called by bus1'); });
-
-        bus1.notify('event-for-bus1');
-
-        assert.ok(bus1WasCalled, 'The subscriber on bus1 should have been called');
-    });
+    bus2.subscribe(() => (bus2SubscriberCalled = true));
+    bus1.notify('eventForBus1');
+    assert.strictEqual(bus2SubscriberCalled, false, 'Subscriber on bus2 should not be called by bus1');
+  });
 });

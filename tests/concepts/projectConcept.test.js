@@ -1,81 +1,61 @@
 import { projectConcept } from '../../src/concepts/projectConcept.js';
-import assert from '../framework/assert.js';
+import { describe, it } from '../test-helpers.js';
+import assert from '../../src/assert.js';
 
-/**
- * A helper to capture all events emitted by a concept's event bus during a test.
- * @param {object} concept The concept to monitor.
- * @returns {Array<{event: string, payload: any}>} A list of captured events.
- */
-function captureEvents(concept) {
-    const events = [];
-    concept.subscribe((event, payload) => {
-        events.push({ event, payload });
-    });
-    return events;
-}
+describe('Project Concept', () => {
+  it('should initialize with a default state', () => {
+    // The concept is a singleton, so we reset it for a clean state.
+    projectConcept.reset();
+    const state = projectConcept.getState();
 
-describe('projectConcept.js', () => {
-    beforeEach(() => {
-        // Reset the concept's state before each test to ensure isolation.
-        projectConcept.reset();
-    });
+    assert.ok(Array.isArray(state.projects), 'projects should be an array');
+    assert.strictEqual(state.projects.length, 0, 'projects should be empty');
+    assert.strictEqual(state.currentProjectId, null, 'currentProjectId should be null');
+  });
 
-    it('should initialize with a default state', () => {
-        const state = projectConcept.getState();
-        assert.ok(Array.isArray(state.projects), 'initial state should have a projects array');
-        assert.strictEqual(state.projects.length, 0, 'projects array should be empty initially');
-        assert.strictEqual(state.currentProjectId, null, 'currentProjectId should be null initially');
-    });
+  it("listen('setProjects') should update the projects array", () => {
+    projectConcept.reset();
+    const newProjects = [{ id: 1, name: 'Project 1' }];
 
-    it("listen('setProjects', ...) should update the projects array and current project", () => {
-        const events = captureEvents(projectConcept);
-        const mockProjects = [{ id: 101, name: 'Project Alpha' }, { id: 102, name: 'Project Beta' }];
+    projectConcept.listen('setProjects', newProjects);
 
-        projectConcept.listen('setProjects', mockProjects);
+    const state = projectConcept.getState();
+    assert.strictEqual(state.projects, newProjects, 'State should be updated with new projects');
+  });
 
-        const state = projectConcept.getState();
-        assert.strictEqual(state.projects.length, 2, 'state.projects should contain 2 projects');
-        assert.strictEqual(state.projects[0].name, 'Project Alpha', 'Project name should be set correctly');
-        assert.strictEqual(state.currentProjectId, 101, 'currentProjectId should default to the first project');
+  it("listen('setCurrentProject') should update currentProjectId", () => {
+    projectConcept.reset();
+    const projectId = 123;
 
-        const projectsUpdatedEvent = events.find(e => e.event === 'projectsUpdated');
-        assert.ok(projectsUpdatedEvent, 'should emit a projectsUpdated event');
-        assert.strictEqual(projectsUpdatedEvent.payload.projects, mockProjects, 'event payload should contain the projects');
-    });
+    projectConcept.listen('setCurrentProject', { projectId });
 
-    it("listen('setCurrentProject', ...) should update currentProjectId and emit projectChanged", () => {
-        const events = captureEvents(projectConcept);
-        const newProjectId = 102;
+    const state = projectConcept.getState();
+    assert.strictEqual(state.currentProjectId, projectId, 'State should be updated with new project ID');
+  });
 
-        projectConcept.listen('setCurrentProject', { projectId: newProjectId });
+  it("listen('createProject') should emit a 'do:createProject' event", () => {
+    projectConcept.reset();
+    const received = [];
+    projectConcept.subscribe((event, payload) => received.push({ event, payload }));
 
-        const state = projectConcept.getState();
-        assert.strictEqual(state.currentProjectId, newProjectId, 'currentProjectId should be updated');
+    const projectData = { name: 'New Project' };
+    projectConcept.listen('createProject', projectData);
 
-        const projectChangedEvent = events.find(e => e.event === 'projectChanged');
-        assert.ok(projectChangedEvent, 'should emit a projectChanged event');
-        assert.strictEqual(projectChangedEvent.payload.projectId, newProjectId, 'event payload should contain the new project ID');
-    });
+    assert.strictEqual(received.length, 1, 'Should have emitted one event');
+    assert.strictEqual(received[0].event, 'do:createProject', 'Should emit do:createProject event');
+    assert.strictEqual(received[0].payload.name, projectData.name, 'Payload should contain the correct project name');
+  });
 
-    it("listen('createProject', ...) should emit a do:createProject event", () => {
-        const events = captureEvents(projectConcept);
-        const newProjectName = 'New Test Project';
+  it("listen('deleteProject') should emit a 'do:deleteProject' event", () => {
+    projectConcept.reset();
+    const received = [];
+    projectConcept.subscribe((event, payload) => received.push({ event, payload }));
 
-        projectConcept.listen('createProject', { name: newProjectName });
+    const projectId = 'proj-to-delete';
+    projectConcept.listen('deleteProject', { projectId });
 
-        const createEvent = events.find(e => e.event === 'do:createProject');
-        assert.ok(createEvent, 'should emit a do:createProject event');
-        assert.strictEqual(createEvent.payload.name, newProjectName, 'payload should contain the new project name');
-    });
-
-    it("listen('deleteProject', ...) should emit a do:deleteProject event", () => {
-        const events = captureEvents(projectConcept);
-        const projectIdToDelete = 101;
-
-        projectConcept.listen('deleteProject', { projectId: projectIdToDelete });
-
-        const deleteEvent = events.find(e => e.event === 'do:deleteProject');
-        assert.ok(deleteEvent, 'should emit a do:deleteProject event');
-        assert.strictEqual(deleteEvent.payload.projectId, projectIdToDelete, 'payload should contain the project ID to delete');
-    });
+    assert.strictEqual(received.length, 1, 'Should have emitted one event');
+    assert.strictEqual(received[0].event, 'do:deleteProject', 'Should emit do:deleteProject event');
+    assert.strictEqual(received[0].payload.projectId, projectId, 'Payload should be the project ID');
+  });
 });

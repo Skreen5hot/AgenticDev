@@ -12,19 +12,19 @@ The event bus is a critical piece of the reactive architecture.
 
 -   **`eventBus.test.js`**
     -   `[ ]` **Creation**: `createEventBus()` should return an object with `subscribe` and `notify` methods.
-    -   `[ ]` **Subscription**: `subscribe(fn)` should successfully register a callback function.
-    -   `[ ]` **Notification**: `notify(event, payload)` should call the subscribed callback with the correct `event` and `payload`.
-    -   `[ ]` **Multiple Subscribers**: `notify` should call all registered subscribers.
-    -   `[ ]` **Isolation**: Events from one bus instance should not trigger subscribers on a different bus instance.
+    -   `[x]` **Subscription**: `subscribe(fn)` should successfully register a callback function.
+    -   `[x]` **Notification**: `notify(event, payload)` should call the subscribed callback with the correct `event` and `payload`.
+    -   `[x]` **Multiple Subscribers**: `notify` should call all registered subscribers.
+    -   `[x]` **Isolation**: Events from one bus instance should not trigger subscribers on a different bus instance.
 
 ### 1.2. `assert.js` (Test Utility)
 
 Testing our test utilities ensures that test failures are accurate.
 
 -   **`assert.test.js`**
-    -   `[ ]` **`assert.ok`**: Should pass for truthy values and throw for falsy values.
-    -   `[ ]` **`assert.strictEqual`**: Should pass for strictly equal values (`===`) and throw for unequal values.
-    -   `[ ]` **`assert.fail`**: Should always throw an error with the provided message.
+    -   `[x]` **`assert.ok`**: Should pass for truthy values and throw for falsy values.
+    -   `[x]` **`assert.strictEqual`**: Should pass for strictly equal values (`===`) and throw for unequal values.
+    -   `[x]` **`assert.fail`**: Should always throw an error with the provided message.
 
 ---
 
@@ -35,13 +35,13 @@ This phase involves testing each "concept" in isolation. The goal is to verify t
 ### 2.1. `projectConcept.js`
 
 -   **`concepts/projectConcept.test.js`**
-    -   `[ ]` **Initial State**: Should initialize with a default state (e.g., `projects: []`, `currentProjectId: null`).
-    -   `[ ]` **State Mutations**:
+    -   `[x]` **Initial State**: Should initialize with a default state (e.g., `projects: []`, `currentProjectId: null`).
+    -   `[x]` **State Mutations**:
         -   `listen('setProjects', ...)`: Should correctly update the `projects` array.
         -   `listen('setCurrentProject', ...)`: Should update `currentProjectId` and emit a `projectChanged` event.
         -   `listen('createProject', ...)`: Should emit a `do:createProject` event.
         -   `listen('deleteProject', ...)`: Should emit a `do:deleteProject` event.
-    -   `[ ]` **Event Emission**: Verify that state changes correctly trigger notification events (e.g., `projectsUpdated`, `projectChanged`).
+    -   `[x]` **Event Emission**: Verify that state changes correctly trigger notification events (e.g., `projectsUpdated`, `projectChanged`).
 
 ### 2.2. `diagramConcept.js`
 

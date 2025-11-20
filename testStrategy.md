@@ -1,141 +1,73 @@
-# Custom Test Strategy for Agentic Projects
+# Simplified Test Strategy: Process-Isolated Testing
 
 ## 1. What: The Core Idea
 
-This project utilizes a lightweight, zero-dependency, custom JavaScript test runner. The goal is to provide a simple, clear, and highly controlled testing environment without the overhead of larger, more complex testing frameworks like Jest or Mocha.
+Our previous testing strategy suffered from state pollution, where tests interfered with one another, leading to flaky results and complex reset logic. This new strategy abandons the shared-process model in favor of **process-level isolation**.
 
-The strategy is built on the familiar `describe` and `it` syntax, making it intuitive for developers accustomed to standard JavaScript testing practices.
+The core idea is simple and powerful: **Every single `*.test.js` file is executed in its own, separate Node.js process.**
+
+This approach provides the ultimate test isolation. Since no memory or state is shared between test files, it is impossible for one test file to "contaminate" another. This eliminates the need for manual `reset()` functions on concepts and complex `beforeEach` hooks for cleanup between files.
 
 ## 2. How: The Implementation
 
-The testing infrastructure is composed of three key parts:
+The new infrastructure is even simpler than before and consists of two key parts.
 
-### a. `test-runner.js` (The Engine)
+### a. `run-tests.js` (The Test Runner)
 
-This file is the heart of the test framework.
+This is the sole entry point for running the entire test suite. It has one job: find all test files and run each one in a dedicated child process.
 
--   **`TestRunner` Object**: A singleton object that manages the entire testing process.
--   **`describe(name, fn)`**: A global function that registers a "suite" of tests. It collects the suite's name and the function containing its tests.
--   **`it(name, fn)`**: A global function that defines an individual test case. It runs the test's code, catches any errors thrown by assertions, and logs the result as a "PASS" or "FAIL".
--   **`TestRunner.run()`**: The asynchronous function that executes all registered test suites and their corresponding test cases, then prints a final summary.
--   **CI/CD Friendly**: The runner exits with a non-zero status code (`process.exit(1)`) if any test fails, which allows continuous integration (CI) pipelines to automatically detect failures.
+-   **Discovery**: It uses Node.js's `fs` module to recursively find all files ending in `.test.js` within the `tests/` directory.
+-   **Execution**: For each test file found, it spawns a new `node` child process using `child_process.spawn`.
+-   **Reporting**:
+    -   It captures the `stdout` and `stderr` from the child process and streams it directly to the console, so you see the output from `describe` and `it` blocks in real-time.
+    -   It monitors the exit code of the child process. An exit code of `0` signifies that all tests in the file passed. A non-zero exit code signifies a failure.
+-   **Summary**: After all files have been run, it prints a final summary of which files passed and which failed.
+-   **CI/CD Integration**: If any test file fails (exits with a non-zero code), the main `run-tests.js` script will exit with `process.exit(1)`, ensuring that CI pipelines correctly detect the failure.
 
-### b. `run-all-tests.js` (The Entry Point)
+### b. `*.test.js` (The Tests)
 
-This file orchestrates the test run. Its operation is a simple, three-step process:
+Test files are now completely self-contained. They no longer depend on a global runner or implicit setup.
 
-1.  **Load the Runner**: It `require`s `test-runner.js`, which sets up the global `describe` and `it` functions.
-2.  **Load Test Files**: It `require`s all test files (e.g., `*.test.js`). As Node.js loads each file, the `describe` calls within them are executed, populating the `TestRunner` with suites to be run.
-3.  **Execute Tests**: Finally, it calls `TestRunner.run()` to start the execution of all the tests that were just loaded.
+-   **Setup**: Each test file is responsible for its own setup. This includes importing an `assert` utility and the concepts it needs to test.
+-   **Structure**: The familiar `describe` and `it` syntax can still be used for organizational purposes, but they can be implemented as simple functions that just print to the console.
+-   **Failure Handling**: The key change is how failures are handled. Inside an `it` block, if an assertion fails, the error is caught, a "FAIL" message is logged, and the process is terminated immediately with `process.exit(1)`. This is the signal to the `run-tests.js` parent process that this test file has failed.
 
-### c. `*.test.js` (The Tests)
+Here is a conceptual example of a simple `it` function:
 
-These files contain the actual test logic. They import the concepts or modules to be tested, and use `describe` and `it` blocks to structure the tests. Assertions are made using a simple, custom `assert` utility.
+```javascript
+// Inside a test file or a shared 'test-utils.js'
+export function it(name, testFn) {
+  try {
+    testFn();
+    console.log(`  ✓ PASS: ${name}`);
+  } catch (error) {
+    console.error(`  ✗ FAIL: ${name}`);
+    console.error(error);
+    process.exit(1); // <-- Critical for signaling failure
+  }
+}
+```
 
 ## 3. Why: The Rationale
 
-This custom approach was chosen for several key reasons, particularly beneficial for new and evolving agentic or conceptual software projects:
+This process-isolated approach directly addresses the failures of the previous strategy.
 
--   **Simplicity & Transparency**: With no external dependencies (`node_modules`) for testing, the entire testing logic is visible and contained within a single file. This makes it easy to understand, debug, and modify. New developers can grasp the whole system quickly.
+-   **Guaranteed Isolation**: By using separate processes, we eliminate all forms of test pollution between files—no more shared global state, no more singleton instances carrying state from one test to the next. Tests are stable and predictable.
 
--   **Full Control**: We have complete control over the execution environment. We can easily add custom logging, modify execution flow, or integrate specialized reporting without fighting the conventions of a third-party framework.
+-   **Radical Simplicity**: The need for complex `reset()` logic on our concepts is completely gone. The `run-tests.js` file, which implicitly coupled all tests together, is also eliminated. The test runner becomes a simple process manager, and test files become simple, standalone scripts.
 
--   **Minimal Overhead**: The runner is extremely fast and lightweight. It does exactly what we need and nothing more, which is ideal for rapid development cycles and reduces complexity.
+-   **Zero Dependencies**: This strategy maintains our goal of a zero-dependency testing framework. It uses only built-in Node.js modules (`fs`, `path`, `child_process`).
 
--   **Focus on Core Logic**: By providing a simple, familiar BDD-style syntax (`describe`/`it`), it allows developers to focus on writing good tests for the application's core concepts rather than learning a complex testing tool.
+-   **Maintainability**: When a test fails, it is contained to its own process. Debugging is easier because you can run the failing file directly (`node tests/concepts/my-failing.test.js`) and know that no other file is influencing its environment.
 
--   **Excellent for Agentic/Conceptual Work**: In projects focused on modeling concepts and their interactions (like this one), a transparent test harness is invaluable. It allows us to test the "wiring" between concepts (as seen in `synchronizations.test.js`) in a direct and unambiguous way.
+## 4. Handling Mocks and the DOM
 
----
+The challenge of mocking browser-specific APIs like `document` and `localStorage` in a Node.js environment remains. However, the new strategy simplifies how we manage them.
 
-This strategy provides a solid foundation for ensuring code quality and correctness while maintaining agility and clarity in the development process.
+-   **Local Mocks**: Instead of a single, massive `setupMockDOM()` function that pollutes the global scope for all tests, each test file that needs a DOM will be responsible for setting up its own mock environment.
+-   **Shared Mock Utilities**: Common mocking logic (like creating a mock element) can be placed in a shared utility file (e.g., `tests/test-utils.js`) and imported by the test files that need it.
 
-## 4. Advanced Strategy: Testing Asynchronous APIs
+This ensures that a test file only creates the mocks it explicitly needs, and those mocks are automatically destroyed when the process exits, leaving a clean slate for the next test file.
 
-The core strategy is excellent for testing synchronous logic and simple event flows. However, when a concept interacts with complex, event-driven browser APIs like `IndexedDB`, the simple approach can lead to flaky, hard-to-debug tests due to race conditions and unpredictable timing.
+This revised strategy provides a much more resilient and scalable foundation for testing, ensuring our tests remain a reliable asset rather than a source of maintenance headaches.
 
-To address this, we extend our strategy with more powerful mocking techniques for these specific cases, while still avoiding a full-blown framework.
-
-### a. The Problem: Asynchronous Complexity
-
--   **Race Conditions**: Tests may start listening for an event that has already fired inside a `setTimeout(..., 0)` callback, leading to timeouts.
--   **Lack of Control**: Using `setTimeout` in mocks to simulate async behavior is unreliable. The test has no direct control over when the mock's callbacks will fire relative to the test's assertions.
--   **Environmental Differences**: APIs like `IndexedDB` do not exist in Node.js, requiring mocks that can accurately replicate a complex, stateful, event-based contract.
-
-### b. Tier 1: Controlled Mocks via Dependency Injection
-This is our sole and mandatory strategy for handling external dependencies in tests. It strictly adheres to the zero-dependency principle of this project. While it can make tests more verbose, it provides complete, deterministic control and eliminates race conditions without introducing external libraries.
-
-1.  **Dependency Injection**: The concept under test must allow its external dependencies to be injected. Instead of directly calling a global `indexedDB`, it should use an internal variable that can be replaced during tests.
-    This is a non-negotiable pattern for any concept that interacts with an external API (like `document`, `localStorage`, or `mermaid`).
-
-    ```javascript
-    // In storageConcept.js
-    let _indexedDB = globalThis.indexedDB;
-    export const storageConcept = {
-        setIndexedDB: (mock) => { _indexedDB = mock; },
-        // ...
-    };
-    ```
-
-2.  **Manual, Controllable Mocks**: The mock object must be created manually as a plain JavaScript object or class. It should be "dumb" and synchronous, containing no complex asynchronous logic like `setTimeout`. Instead, it provides methods that allow the test to manually trigger success or failure states, giving the test full control over the flow.
-
-    ```javascript
-    // In a test file
-    const openPromise = storageConcept.listen('do:open');
-    // The test has full control and decides when the operation succeeds.
-    mockDb.lastRequest._fireSuccess(mockConnection);
-    await openPromise;
-    ```
-
-### Key Lesson: Ensuring Test Isolation with Stateful Concepts
-
-Our experience with `storageConcept.js` revealed a critical challenge when testing stateful singletons: **test pollution**, where state from one test leaks into and affects subsequent tests.
-
-**The Problem:** The `storageConcept` maintains internal state variables (like `_db` and `_dbConnectionPromise`). Without a reset, the second test would find the concept already in an "open" state from the first test, causing it to behave differently and fail.
-
-**The Solution:** To guarantee that each test runs in isolation, we implemented a two-part strategy:
-
-1.  **Expose a `reset()` Method:** The stateful concept (`storageConcept`) must provide a `reset()` method that clears all its internal state variables back to their initial values.
-
-2.  **Strict `beforeEach` Order:** The test file must use a `beforeEach` block to prepare the concept for each test, following a strict order of operations:
-
-    ```javascript
-    // In storageConcept.test.js
-    beforeEach(() => {
-        // 1. Reset FIRST: Clears any state from previous tests.
-        // This is critical because reset() also reverts _indexedDB to its default.
-        storageConcept.reset();
-
-        // 2. Create Mock: Instantiate a new mock for the current test.
-        mockDb = new MockIndexedDB();
-
-        // 3. Inject LAST: Inject the new mock. It will now be used by a clean concept.
-        storageConcept.setIndexedDB(mockDb);
-    });
-    ```
-
-This `Reset -> Create -> Inject` pattern ensures every test starts with a clean, correctly configured concept, completely eliminating test pollution and making our asynchronous tests stable and reliable.
-
-### Key Lesson #2: Managing Asynchronous Race Conditions
-
-Our experience with `storageConcept.js` also revealed a subtle race condition when testing `async` functions that attach event handlers (like `request.onsuccess`).
-
-**The Problem:** A test would call an `async` function on a concept and immediately try to trigger a mock callback. However, the test would time out because the event it was waiting for was never emitted.
-
-**The Root Cause:**
-1.  The test calls `concept.listen('do:somethingAsync')`.
-2.  Because `listen` calls an `async` function, it starts executing but does **not** block the test.
-3.  The test code continues **immediately** to the next line, which tries to fire the mock callback (e.g., `mockRequest.onsuccess()`).
-4.  At this exact moment, the `async` function has not yet progressed far enough to attach its handler to the mock object (`mockRequest.onsuccess = ...`).
-5.  The test tries to call `undefined`, the handler never runs, and the test times out.
-
-**The Solution:** We must yield control back to the Node.js event loop briefly to allow the `async` function to run up to its first `await` and attach its handlers. This is done with a single line:
-
-```javascript
-// In an async test function
-
-// Yield to the event loop
-await new Promise(resolve => setImmediate(resolve));
-```
-
-This `Act -> Yield -> Control -> Assert` pattern ensures that the concept has time to set up its listeners before the test attempts to trigger them, eliminating the race condition.

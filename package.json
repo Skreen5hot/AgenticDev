@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node run-all-tests.js",
+    "test": "node run-tests.js",
     "security-check": "npm audit --audit-level=high",
     "prepare": "husky install"
   },
