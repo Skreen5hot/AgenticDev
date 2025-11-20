@@ -71,3 +71,28 @@ This ensures that a test file only creates the mocks it explicitly needs, and th
 
 This revised strategy provides a much more resilient and scalable foundation for testing, ensuring our tests remain a reliable asset rather than a source of maintenance headaches.
 
+## 5. Lessons Learned: Taming State and Asynchronicity
+
+While the process-isolated strategy provides a robust foundation, our experience with implementing the test suite revealed critical patterns necessary for writing stable tests, especially for stateful, asynchronous modules like `storageConcept`.
+
+### The Singleton Challenge
+
+Process isolation prevents state from leaking between test *files*. However, it does not prevent state from leaking between `it` blocks *within the same file*. Since our concepts are implemented as singletons, importing `storageConcept` once means the same instance (and its state, like an open database connection) is shared across all tests in that file.
+
+### The Golden Rule: Isolate Every `it` Block
+
+The solution to singleton state pollution is a strict and non-negotiable pattern: **a setup/reset function must be called at the beginning of every single `it` block.**
+
+```javascript
+// GOOD: Guarantees a clean slate for every test.
+it('should do something', () => {
+  beforeEach(); // Reset state at the start of the test.
+  // ... test logic
+});
+```
+
+This ensures that no residual state from a previous test can cause a subsequent test to fail, which was the root cause of the instability we saw with the `storageConcept` tests.
+
+### The Integration Mocking Trap
+
+Mocks for unit tests can be simple, but mocks for integration tests must be much more complete. Our `synchronizations.test.js` file required a mock `IndexedDB` that supported `index()` and `put()` methods, whereas the simpler unit tests did not. This is because integration tests exercise deeper and more complex code paths. The strategy must account for evolving mocks as integration coverage grows.

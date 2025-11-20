@@ -6,7 +6,9 @@ let _dbConnectionPromise = null;
 
 async function _open() {
     if (_db) {
-        bus.notify('databaseOpened');
+        // Make this async to allow subscribers to attach before the event fires.
+        // This prevents a race condition in tests.
+        Promise.resolve().then(() => bus.notify('databaseOpened'));
         return;
     }
     if (_dbConnectionPromise) {
@@ -118,6 +120,7 @@ function _deleteDiagram({ diagramId }) {
 
 function _reset() {
     _db = null;
+    _dbConnectionPromise = null;
 }
 
 const actions = {
@@ -141,6 +144,10 @@ export const storageConcept = {
         // For any action that is not 'do:open', ensure the db is open first.
         if (event !== 'do:open' && !_db) {
             await _open();
+        }
+        // It's possible for the above await to resolve but _db not be set yet due to microtask timing.
+        if (event !== 'do:open' && !_db && _dbConnectionPromise) {
+            await _dbConnectionPromise;
         }
         if (actions[event]) { // Now that we know _db is ready, proceed.
             actions[event](payload);
