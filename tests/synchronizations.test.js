@@ -163,9 +163,14 @@ function setupMockEnvironment() {
         clear: function() { this._store = {}; }
     };
 
-    global.mermaid = {
-        initialize: () => {}
+    // Create a manual, zero-dependency mock for the Mermaid API.
+    // The methods are async because uiConcept awaits them.
+    const mermaidMock = {
+        parse: async () => {}, // Does nothing, just needs to be awaitable
+        render: async () => ({ svg: '<svg>mocked_svg</svg>' }), // Returns the expected object structure
+        initialize: () => {} // A simple empty function
     };
+    uiConcept.setMermaid(mermaidMock);
 
     global.prompt = () => 'Mocked Prompt';
 }

@@ -1,6 +1,8 @@
 import { createEventBus } from '../utils/eventBus.js';
 import { tracer } from '../utils/tracer.js';
 
+let mermaid = globalThis.mermaid;
+
 const bus = createEventBus();
 
 const initialState = {
@@ -328,6 +330,14 @@ const actions = {
     'toggleSplitView': _toggleSplitView,
 };
 
+/**
+ * Injects a mermaid library instance, primarily for testing purposes.
+ * @param {object} mockMermaid - The mock mermaid object.
+ */
+function _setMermaid(mockMermaid) {
+    mermaid = mockMermaid;
+}
+
 export const uiConcept = {
     subscribe: bus.subscribe,
     notify: bus.notify,
@@ -337,5 +347,6 @@ export const uiConcept = {
         if (actions[event]) {
             actions[event](payload);
         }
-    }
+    },
+    setMermaid: _setMermaid,
 };
