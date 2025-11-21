@@ -19,8 +19,7 @@ let elements = {};
 function _cacheElements() {
     const ids = [
         'code-tab', 'diagram-tab', 'code-view', 'diagram-view', 'code-editor',
-        'diagram-container', 'file-info', 'split-view-btn', 'project-sidebar',
-        'sidebar-toggle-btn', 'project-selector', 'diagram-list', 'theme-toggle',
+        'diagram-container', 'file-info', 'split-view-btn', 'project-sidebar', 'project-selector', 'diagram-list', 'theme-toggle',
         'new-project-btn', 'delete-project-btn', 'new-btn', 'save-btn',
         'delete-btn', 'rename-btn', 'new-modal', 'new-name', 'new-cancel-btn',
         'new-create-btn', 'upload-diagrams-input', 'download-project-btn', 'sidebar-resizer',
@@ -266,12 +265,6 @@ function _attachEventListeners() {
     elements['new-cancel-btn']?.addEventListener('click', _hideNewDiagramModal);
 
     elements['render-btn']?.addEventListener('click', () => bus.notify('ui:renderDiagramRequested'));
-
-    // Sidebar toggle
-    elements['sidebar-toggle-btn']?.addEventListener('click', () => {
-        elements['project-sidebar'].classList.toggle('closed');
-        elements['sidebar-toggle-btn'].classList.toggle('closed');
-    });
 
     // Tabs
     elements['code-tab']?.addEventListener('click', () => _switchTab('code'));

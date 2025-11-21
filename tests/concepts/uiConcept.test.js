@@ -10,8 +10,7 @@ function setupMockDOM() {
     mockElements = {};
     const ids = [
         'code-tab', 'diagram-tab', 'code-view', 'diagram-view', 'code-editor',
-        'diagram-container', 'file-info', 'split-view-btn', 'project-sidebar',
-        'sidebar-toggle-btn', 'project-selector', 'diagram-list', 'theme-toggle',
+        'diagram-container', 'file-info', 'split-view-btn', 'project-sidebar', 'project-selector', 'diagram-list', 'theme-toggle',
         'new-project-btn', 'delete-project-btn', 'new-btn', 'save-btn',
         'delete-btn', 'rename-btn', 'new-modal', 'new-name', 'new-cancel-btn',
         'new-create-btn', 'upload-diagrams-input', 'download-project-btn', 'sidebar-resizer',
@@ -127,23 +126,6 @@ describe('UI Concept', () => {
         assert.strictEqual(received.length, 1, 'Should have emitted one event');
         assert.strictEqual(received[0].event, 'ui:projectSelected', 'Event name should be correct');
         assert.strictEqual(received[0].payload.projectId, '3', 'Payload should contain the selected project ID');
-    });
-
-    it("should toggle the 'closed' class on the sidebar and toggle button when clicked", () => {
-        beforeEach();
-        const sidebar = mockElements['project-sidebar'];
-        const toggleBtn = mockElements['sidebar-toggle-btn'];
-
-        // Simulate the first click to close the sidebar
-        toggleBtn._trigger('click');
-
-        assert.ok(sidebar.classList.contains('closed'), 'Sidebar should have the "closed" class after first click');
-        assert.ok(toggleBtn.classList.contains('closed'), 'Toggle button should have the "closed" class after first click');
-
-        // Simulate the second click to open the sidebar
-        toggleBtn._trigger('click');
-        assert.ok(!sidebar.classList.contains('closed'), 'Sidebar should not have the "closed" class after second click');
-        assert.ok(!toggleBtn.classList.contains('closed'), 'Toggle button should not have the "closed" class after second click');
     });
 
     it('should handle the new diagram flow via modal', () => {
