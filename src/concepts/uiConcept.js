@@ -10,6 +10,7 @@ const initialState = {
     isSidebarOpen: true,
     activeView: 'code', // 'code', 'diagram', or 'split'
     activeTab: 'code', // 'code' or 'diagram'
+    isFullscreen: false,
 };
 
 let state = { ...initialState };
@@ -21,7 +22,7 @@ function _cacheElements() {
         'code-tab', 'diagram-tab', 'code-view', 'diagram-view', 'code-editor',
         'diagram-container', 'file-info', 'split-view-btn', 'project-sidebar', 'project-selector', 'diagram-list', 'theme-toggle',
         'new-project-btn', 'delete-project-btn', 'new-btn', 'save-btn',
-        'delete-btn', 'rename-btn', 'new-modal', 'new-name', 'new-cancel-btn',
+        'delete-btn', 'rename-btn', 'fullscreen-btn', 'new-modal', 'new-name', 'new-cancel-btn',
         'new-create-btn', 'upload-diagrams-input', 'download-project-btn', 'sidebar-resizer',
         'split-view-resizer',
         'export-mmd-btn', 'render-btn'
@@ -270,6 +271,9 @@ function _attachEventListeners() {
     elements['code-tab']?.addEventListener('click', () => _switchTab('code'));
     elements['diagram-tab']?.addEventListener('click', () => _switchTab('diagram'));
     elements['split-view-btn']?.addEventListener('click', () => _toggleSplitView());
+
+    // Fullscreen toggle
+    elements['fullscreen-btn']?.addEventListener('click', () => _toggleFullscreen());
 }
 
 function _switchTab(tabName) {
@@ -317,6 +321,20 @@ function _toggleSplitView() {
         elements['code-tab'].classList.remove('split-active-tab');
         elements['diagram-tab'].classList.remove('split-active-tab');
         _switchTab(state.activeTab); // Re-apply single-tab view
+    }
+}
+
+function _toggleFullscreen() {
+    state.isFullscreen = !state.isFullscreen;
+    document.body.classList.toggle('fullscreen-active', state.isFullscreen);
+
+    const btn = elements['fullscreen-btn'];
+    if (btn) {
+        if (state.isFullscreen) {
+            btn.textContent = '⛶';
+        } else {
+            btn.textContent = '⇱';
+        }
     }
 }
 

@@ -11,7 +11,7 @@ function setupMockDOM() {
     const ids = [
         'code-tab', 'diagram-tab', 'code-view', 'diagram-view', 'code-editor',
         'diagram-container', 'file-info', 'split-view-btn', 'project-sidebar', 'project-selector', 'diagram-list', 'theme-toggle',
-        'new-project-btn', 'delete-project-btn', 'new-btn', 'save-btn',
+        'new-project-btn', 'delete-project-btn', 'new-btn', 'save-btn', 'fullscreen-btn',
         'delete-btn', 'rename-btn', 'new-modal', 'new-name', 'new-cancel-btn',
         'new-create-btn', 'upload-diagrams-input', 'download-project-btn', 'sidebar-resizer',
         'split-view-resizer', 'content-area',
@@ -57,7 +57,18 @@ function setupMockDOM() {
     // Mock document
     global.document = {
         getElementById: (id) => mockElements[id] || null,
-        body: { style: {}, userSelect: '' },
+        body: { 
+            style: {}, 
+            userSelect: '',
+            classList: {
+                _classes: new Set(),
+                toggle: function(className, force) {
+                    if (force) this._classes.add(className);
+                    else this._classes.delete(className);
+                },
+                contains: function(className) { return this._classes.has(className) }
+            }
+        },
         addEventListener: () => {},
         removeEventListener: () => {},
     };
@@ -178,5 +189,27 @@ describe('UI Concept - Split View Tabs', () => {
         splitViewBtn._trigger('click'); // Deactivate split view
         assert.ok(!codeTab.classList.contains('split-active-tab'), 'Code tab should not be grayed out');
         assert.ok(!diagramTab.classList.contains('split-active-tab'), 'Diagram tab should not be grayed out');
+    });
+});
+
+describe('UI Concept - Fullscreen', () => {
+    function beforeEach() {
+        setupMockDOM();
+        uiConcept.reset();
+        uiConcept.setMermaid(mockMermaid);
+        uiConcept.listen('initialize');
+    }
+
+    it('should toggle fullscreen mode and update the button icon', () => {
+        beforeEach();
+        const fullscreenBtn = mockElements['fullscreen-btn'];
+
+        fullscreenBtn._trigger('click'); // Enter fullscreen
+        assert.ok(global.document.body.classList.contains('fullscreen-active'), 'Body should have fullscreen class');
+        assert.strictEqual(fullscreenBtn.textContent, '⛶', 'Button icon should change to exit fullscreen');
+
+        fullscreenBtn._trigger('click'); // Exit fullscreen
+        assert.ok(!global.document.body.classList.contains('fullscreen-active'), 'Body should not have fullscreen class');
+        assert.strictEqual(fullscreenBtn.textContent, '⇱', 'Button icon should revert to enter fullscreen');
     });
 });

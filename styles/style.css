@@ -214,6 +214,11 @@ main {
   color: #ecf0f1;
 }
 
+button#fullscreen-btn {
+    padding: 0 10px;
+    font-size: 2rem;
+}
+
 #code-editor {
   flex-grow: 1;
   border: none;
@@ -605,4 +610,14 @@ input:checked + .slider {
 
 input:checked + .slider:before {
   transform: translateX(26px);
+}
+
+/* --- Fullscreen Mode --- */
+body.fullscreen-active header,
+body.fullscreen-active footer {
+  display: none;
+}
+
+body.fullscreen-active main {
+  height: 100vh;
 }
