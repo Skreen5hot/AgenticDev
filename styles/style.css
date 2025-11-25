@@ -324,7 +324,7 @@ main.split-view-active #diagram-toolbar {
   margin: 8px 0;
 }
 
-#delete-project-btn {
+#project-settings-btn{
   flex-shrink: 0;
   width: 36px;
   border: 1px solid var(--border-color);

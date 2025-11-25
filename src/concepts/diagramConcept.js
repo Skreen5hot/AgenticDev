@@ -123,5 +123,9 @@ export const diagramConcept = {
     subscribers.add(fn);
   },
 
+  unsubscribe(fn) {
+    subscribers.delete(fn);
+  },
+
   notify,
 };

@@ -200,6 +200,13 @@ export const storageConcept = {
     updateDiagram(diagramData) { return storageConcept.actions._put('diagrams', diagramData); },
 
     /**
+     * Retrieves a single project by its ID.
+     * @param {number} projectId - The ID of the project.
+     * @returns {Promise<any>} The project object.
+     */
+    getProject(projectId) { return storageConcept.actions._get('projects', projectId); },
+
+    /**
      * Deletes a diagram from the 'diagrams' object store.
      * @param {number} diagramId - The ID of the diagram to delete.
      * @returns {Promise<void>}
@@ -304,6 +311,10 @@ export const storageConcept = {
 
   subscribe(fn) {
     subscribers.add(fn);
+  },
+
+  unsubscribe(fn) {
+    subscribers.delete(fn);
   },
 
   notify,

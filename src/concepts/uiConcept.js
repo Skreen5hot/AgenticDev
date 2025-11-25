@@ -18,6 +18,7 @@ const initialState = {
     isSidebarOpen: true,
     activeView: 'code', // 'code', 'diagram', or 'split'
     activeTab: 'code', // 'code' or 'diagram'
+    activeSettingsProject: null, // The project being viewed in the settings modal
     isFullscreen: false,
 };
 
@@ -46,6 +47,15 @@ function _cacheElements() {
         'connect-password-confirm', 'connect-password-error',
         'connect-cancel-btn', 'connect-submit-btn', 'unlock-session-modal',
         // New elements for local project creation
+        'project-settings-btn', // New button
+        'project-settings-modal', 'settings-project-name-display',
+        'settings-project-provider-display', 'settings-repo-path-group', 'settings-repo-path-display',
+        'settings-rename-input', 'settings-rename-btn', 'settings-disconnect-btn',
+        'settings-delete-btn', 'settings-close-btn', // New modal elements
+        // Elements for connecting a local project to Git
+        'settings-connect-to-git-section', 'settings-connect-provider', 'settings-connect-repo-path',
+        'settings-connect-token', 'settings-connect-password', 'settings-connect-password-confirm',
+        'settings-connect-password-error', 'settings-connect-submit-btn',
         'connect-local-project-name', 'connect-local-project-name-group',
         'connect-git-fields-group', 'connect-master-password-group',
         // Existing elements
@@ -336,6 +346,44 @@ function _hideUnlockSessionModal() {
     }
 }
 
+function _showProjectSettingsModal({ project }) {
+    if (elements['project-settings-modal']) {
+        if (!project) {
+            console.error('[UI] showProjectSettingsModal called without a project.');
+            return;
+        }
+        state.activeSettingsProject = project; // Store the project being configured
+
+        // Populate the modal with the project's details
+        elements['settings-project-name-display'].textContent = project.name;
+        elements['settings-project-provider-display'].textContent = project.gitProvider;
+        elements['settings-rename-input'].value = project.name; // Pre-fill the rename input
+
+        // Conditionally show the repository path for Git-connected projects
+        const repoPathGroup = elements['settings-repo-path-group'];
+        repoPathGroup.style.display = (project.gitProvider !== 'local' && project.repositoryPath) ? 'block' : 'none';
+        elements['settings-repo-path-display'].textContent = project.repositoryPath || '';
+
+        // Conditionally show the disconnect button
+        const disconnectBtn = elements['settings-disconnect-btn'];
+        disconnectBtn.style.display = (project.gitProvider !== 'local') ? 'block' : 'none';
+
+        // Conditionally show the "Connect to Git" section for local projects
+        const connectToGitSection = elements['settings-connect-to-git-section'];
+        connectToGitSection.style.display = (project.gitProvider === 'local') ? 'block' : 'none';
+
+        elements['project-settings-modal'].style.display = 'flex';
+    }
+}
+
+function _hideProjectSettingsModal() {
+    if (elements['project-settings-modal']) {
+        elements['project-settings-modal'].style.display = 'none';
+        state.activeSettingsProject = null; // Clear the project on hide
+    }
+}
+
+
 function _attachEventListeners() {
     elements['project-selector']?.addEventListener('change', (e) => {
         const selectedId = parseInt(e.target.value, 10);
@@ -346,9 +394,9 @@ function _attachEventListeners() {
         console.log('[UI] "New Project" button clicked. Showing connect modal.');
         _showConnectProjectModal();
     });
-    elements['delete-project-btn']?.addEventListener('click', () => {
-        console.log('[UI] "Delete Project" button clicked.');
-        notify('ui:deleteProjectClicked');
+    elements['project-settings-btn']?.addEventListener('click', () => {
+        console.log('[UI] "Project Settings" button clicked. Showing settings modal.');
+        notify('ui:projectSettingsClicked');
     });
 
     elements['diagram-list']?.addEventListener('click', (e) => {
@@ -526,6 +574,87 @@ function _attachEventListeners() {
       // Reset the input so the user can upload the same file again if they wish
       e.target.value = '';
   });
+
+  elements['settings-rename-btn']?.addEventListener('click', () => {
+    const project = state.activeSettingsProject;
+    const newName = elements['settings-rename-input'].value.trim();
+
+    if (!project) {
+        return console.error('[UI] Rename clicked, but no project is active in settings.');
+    }
+    if (!newName) {
+        return uiConcept.actions.showNotification({ message: 'Project name cannot be empty.', type: 'error' });
+    }
+    if (newName === project.name) {
+        return uiConcept.actions.showNotification({ message: 'New name is the same as the current name.', type: 'info' });
+    }
+
+    console.log(`[UI] Rename confirmed for project ${project.id} to "${newName}".`);
+    notify('ui:renameProjectConfirmed', { projectId: project.id, newName });
+  });
+
+  elements['settings-disconnect-btn']?.addEventListener('click', () => {
+    const project = state.activeSettingsProject;
+    if (!project) {
+        return console.error('[UI] Disconnect clicked, but no project is active in settings.');
+    }
+
+    if (confirm(`Are you sure you want to disconnect the project "${project.name}" from its Git repository?\n\nThis will turn it into a local-only project. It will NOT affect your remote Git repository.`)) {
+        console.log(`[UI] Disconnect confirmed for project ${project.id}.`);
+        notify('ui:disconnectProjectConfirmed', { projectId: project.id });
+    }
+  });
+
+  // --- Project Settings -> Connect to Git Listeners ---
+  const settingsConnectInputs = ['settings-connect-repo-path', 'settings-connect-token', 'settings-connect-password', 'settings-connect-password-confirm'];
+  const settingsConnectSubmitBtn = elements['settings-connect-submit-btn'];
+  const settingsConnectPasswordError = elements['settings-connect-password-error'];
+
+  const _updateSettingsConnectButtonState = () => {
+    const allFilled = settingsConnectInputs.every(id => elements[id].value.trim() !== '');
+    const passwordsMatch = elements['settings-connect-password'].value === elements['settings-connect-password-confirm'].value;
+
+    settingsConnectPasswordError.style.display = (elements['settings-connect-password'].value && elements['settings-connect-password-confirm'].value && !passwordsMatch) ? 'block' : 'none';
+    settingsConnectSubmitBtn.disabled = !(allFilled && passwordsMatch);
+  };
+
+  settingsConnectInputs.forEach(id => elements[id]?.addEventListener('input', _updateSettingsConnectButtonState));
+
+  settingsConnectSubmitBtn?.addEventListener('click', () => {
+    const project = state.activeSettingsProject;
+    if (!project) {
+      return console.error('[UI] Save Connection clicked, but no project is active in settings.');
+    }
+
+    const payload = {
+      projectId: project.id,
+      gitProvider: elements['settings-connect-provider'].value,
+      repositoryPath: elements['settings-connect-repo-path'].value.trim(),
+      token: elements['settings-connect-token'].value.trim(),
+      password: elements['settings-connect-password'].value,
+    };
+
+    console.log(`[UI] Connecting existing project ${project.id} to Git.`);
+    notify('ui:connectExistingLocalProjectConfirmed', payload);
+  });
+
+  // Initialize the button state
+  if (settingsConnectSubmitBtn) _updateSettingsConnectButtonState();
+
+
+  elements['settings-delete-btn']?.addEventListener('click', () => {
+    const project = state.activeSettingsProject;
+    if (!project) {
+        return console.error('[UI] Delete clicked, but no project is active in settings.');
+    }
+
+    if (confirm(`Are you sure you want to delete the project "${project.name}" locally?\n\nThis will remove the project and all its diagrams from this browser. It will NOT affect your remote Git repository.`)) {
+        console.log(`[UI] Delete confirmed for project ${project.id}.`);
+        notify('ui:deleteLocalProjectConfirmed', { projectId: project.id });
+    }
+  });
+
+  elements['settings-close-btn']?.addEventListener('click', _hideProjectSettingsModal);
 }
 
 function _switchTab(tabName) {
@@ -605,6 +734,7 @@ function _setMermaid(mockMermaid) {
 
 export const uiConcept = {
     subscribe(fn) { subscribers.add(fn); },
+    unsubscribe(fn) { subscribers.delete(fn); },
     notify,
     getState: () => ({ ...state }),
     reset: _reset,
@@ -624,6 +754,8 @@ export const uiConcept = {
         showNewDiagramModal: _showNewDiagramModal,
         showConnectProjectModal: _showConnectProjectModal,
         hideConnectProjectModal: _hideConnectProjectModal,
+        showProjectSettingsModal: _showProjectSettingsModal,
+        hideProjectSettingsModal: _hideProjectSettingsModal,
         showUnlockSessionModal: _showUnlockSessionModal,
         hideUnlockSessionModal: _hideUnlockSessionModal,
         switchTab: _switchTab,

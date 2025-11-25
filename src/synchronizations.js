@@ -97,7 +97,7 @@ export const synchronizations = [
   {
     when: 'diagramCreationRequested',
     from: diagramConcept,
-    do: async ({ name, projectId, content }) => {
+    do: async ({ name, projectId, content, skipSyncTrigger = false }) => {
       // Ensure the diagram name ends with .mmd
       const finalName = name.endsWith('.mmd') ? name : `${name}.mmd`;
 
@@ -136,7 +136,9 @@ export const synchronizations = [
         // --- NEW ---
         // And immediately select the new diagram to be active in the editor.
         diagramConcept.actions.loadDiagramContent({ diagramId: newId });
-        syncConcept.actions.triggerSync(); // Trigger sync after creating a diagram
+        if (!skipSyncTrigger) {
+          syncConcept.actions.triggerSync(); // Trigger sync after creating a diagram
+        }
         console.log(`[Sync] Diagram "${name}" created and added to sync queue.`);
       } catch (error) {
         console.error('[Sync] Failed to create diagram or add to sync queue:', error);
@@ -263,6 +265,10 @@ export const synchronizations = [
           const encryptedToken = await securityConcept.actions.encryptToken(token, password);
           console.log('[Sync] Token encrypted successfully.');
 
+          // --- FIX: Unlock the session with the provided token for immediate use ---
+          // This makes the token available for the initial sync.
+          securityConcept.state.decryptedToken = token;
+
           // 4. Prepare the project object for storage
           newProject = {
             name: name || repositoryPath, // Use provided name, or repositoryPath as default
@@ -280,13 +286,29 @@ export const synchronizations = [
         const newProjectId = await storageConcept.actions.addProject(newProject); // Capture the new ID
         console.log('[Sync] New project saved successfully.');
 
-        // 6. Refresh the project list in the application state
-        projectConcept.actions.loadProjects();
+        // --- FIX: Await the project list reload to prevent a race condition ---
+        // 6. Create a promise that resolves when projects are loaded.
+        const projectsLoadedPromise = new Promise(resolve => {
+          const tempSub = (event, payload) => {
+            if (event === 'projectsLoaded') {
+              projectConcept.unsubscribe(tempSub); // Clean up the temporary subscriber
+              resolve(payload);
+            }
+          };
+          projectConcept.subscribe(tempSub);
+        });
 
-        // --- NEW: Set the newly created project as active ---
+        // 7. Trigger the reload and wait for it to complete.
+        projectConcept.actions.loadProjects();
+        await projectsLoadedPromise;
+
+        // 8. Now that the state is updated, set the newly created project as active.
         projectConcept.actions.setActiveProject(newProjectId);
 
-        // 7. Close the modal and show a success notification
+        // --- FIX: Trigger an initial sync to pull diagrams from the new repo ---
+        syncConcept.actions.triggerSync();
+
+        // 9. Close the modal and show a success notification
         uiConcept.actions.hideConnectProjectModal();
         uiConcept.actions.showNotification({ // Use the project's actual name for the notification
           message: `Project "${newProject.name}" connected successfully!`,
@@ -321,6 +343,15 @@ export const synchronizations = [
             createdAt: new Date(),
           });
           syncConcept.actions.triggerSync(); // Trigger sync after deleting a diagram
+        } else if (diagramToDelete) {
+          // --- FIX: Handle deletion of a local-only diagram that might be in the sync queue ---
+          // If the diagram has no remote SHA, it was never synced. We must remove any pending
+          // 'create' or 'update' actions for it from the sync queue to prevent it from being
+          // created on the remote after it has been deleted locally.
+          const queue = await storageConcept.actions.getSyncQueueItems();
+          const pendingItem = queue.find(item => item.diagramId === diagramId);
+          if (pendingItem) await storageConcept.actions.deleteSyncQueueItem(pendingItem.id);
+          console.log(`[Sync] Purged pending sync queue item for local-only diagram ${diagramId}.`);
         }
 
         await storageConcept.actions.deleteDiagram(diagramId);
@@ -555,16 +586,46 @@ export const synchronizations = [
     },
   },
   {
-    when: 'ui:deleteProjectClicked',
+    when: 'ui:projectSettingsClicked',
     from: uiConcept,
     do: () => {
-      const projectId = projectConcept.state.activeProjectId;
-      if (projectId) {
-        // This triggers the 'projectDeletionRequested' synchronization,
-        // which handles user confirmation and the actual deletion logic.
-        projectConcept.actions.deleteProject(projectId);
+      const activeProjectId = projectConcept.state.activeProjectId;
+      const activeProject = projectConcept.state.projects.find(p => p.id === activeProjectId);
+
+      if (activeProject) {
+        uiConcept.actions.showProjectSettingsModal({ project: activeProject });
       } else {
-        alert('No project selected to delete.');
+        console.warn('[Sync] Project settings clicked, but no active project found.');
+      }
+    },
+  },
+  {
+    when: 'ui:renameProjectConfirmed',
+    from: uiConcept,
+    do: async ({ projectId, newName }) => {
+      console.log(`[Sync] Handling rename for project ${projectId} to "${newName}".`);
+      try {
+        // 1. Validate that the new name is not already in use by another project.
+        const allProjects = await storageConcept.actions.getAllProjects();
+        if (allProjects.some(p => p.name === newName && p.id !== projectId)) {
+          throw new Error(`A project named "${newName}" already exists.`);
+        }
+
+        // 2. Get the project, update its name, and save it back.
+        const projectToUpdate = allProjects.find(p => p.id === projectId);
+        if (!projectToUpdate) throw new Error('Project not found.');
+
+        projectToUpdate.name = newName;
+        projectToUpdate.updatedAt = new Date();
+        await storageConcept.actions.updateProject(projectToUpdate);
+
+        // 3. Refresh the project list and close the modal.
+        projectConcept.actions.loadProjects();
+        uiConcept.actions.hideProjectSettingsModal();
+        uiConcept.actions.showNotification({ message: 'Project renamed successfully!', type: 'success' });
+      } catch (error) {
+        console.error('[Sync] Failed to rename project:', error);
+        uiConcept.actions.showNotification({ message: `Rename failed: ${error.message}`, type: 'error' });
       }
     },
   },
@@ -581,12 +642,18 @@ export const synchronizations = [
 
       // Use the existing diagram creation flow for each uploaded file.
       // This ensures validation, sync queueing, and UI updates are all handled correctly.
-      diagrams.forEach(diagram => {
-        console.log(`[Sync] Calling createDiagram for uploaded file: "${diagram.name}"`);
-        diagramConcept.actions.createDiagram({ name: diagram.name, projectId, content: diagram.content });
-      });
+      const creationPromises = diagrams.map(diagram => {
+        console.log(`[Sync] Queueing creation for uploaded file: "${diagram.name}"`);
+        // Pass skipSyncTrigger: true to prevent a sync storm.
+        return diagramConcept.actions.createDiagram({ name: diagram.name, projectId, content: diagram.content, skipSyncTrigger: true });
+      })
 
-      uiConcept.actions.showNotification({ message: `Successfully imported ${diagrams.length} diagram(s).`, type: 'success' });
+      // Once all diagrams are processed, trigger a single sync.
+      Promise.all(creationPromises).then(() => {
+        console.log('[Sync] Bulk upload processing finished. Triggering a single sync.');
+        syncConcept.actions.triggerSync();
+        uiConcept.actions.showNotification({ message: `Successfully imported ${diagrams.length} diagram(s).`, type: 'success' });
+      })
     },
   },
   {
@@ -606,6 +673,111 @@ export const synchronizations = [
       } else {
         console.warn('[Sync] Export .mmd clicked, but no saved diagram is active.');
         uiConcept.actions.showNotification({ message: 'Please save the diagram before exporting.', type: 'info' });
+      }
+    },
+  },
+  {
+    when: 'ui:disconnectProjectConfirmed',
+    from: uiConcept,
+    do: async ({ projectId }) => {
+      console.log(`[Sync] Handling disconnect for project ${projectId}.`);
+      try {
+        const projectToUpdate = await storageConcept.actions.getProject(projectId);
+        if (!projectToUpdate) throw new Error('Project not found.');
+
+        // Convert the project to a local-only project
+        projectToUpdate.gitProvider = 'local';
+        projectToUpdate.repositoryPath = null;
+        projectToUpdate.defaultBranch = null;
+        projectToUpdate.lastSyncSha = null;
+        projectToUpdate.encryptedToken = null;
+        projectToUpdate.updatedAt = new Date();
+
+        await storageConcept.actions.updateProject(projectToUpdate);
+
+        // Refresh the project list and close the modal
+        projectConcept.actions.loadProjects();
+        uiConcept.actions.hideProjectSettingsModal();
+        uiConcept.actions.showNotification({ message: 'Project disconnected from Git successfully!', type: 'success' });
+      } catch (error) {
+        console.error('[Sync] Failed to disconnect project:', error);
+        uiConcept.actions.showNotification({ message: `Disconnect failed: ${error.message}`, type: 'error' });
+      }
+    },
+  },
+  {
+    when: 'ui:deleteLocalProjectConfirmed',
+    from: uiConcept,
+    do: ({ projectId }) => {
+      console.log(`[Sync] Handling confirmed local deletion for project ${projectId}.`);
+      // This triggers the 'projectDeletionRequested' synchronization, which handles the actual deletion logic.
+      projectConcept.actions.deleteProject(projectId);
+      uiConcept.actions.hideProjectSettingsModal();
+      uiConcept.actions.showNotification({ message: 'Project deleted locally.', type: 'success' });
+    },
+  },
+  {
+    when: 'ui:connectExistingLocalProjectConfirmed',
+    from: uiConcept,
+    do: async ({ projectId, gitProvider, repositoryPath, token, password }) => {
+      console.log(`[Sync] Handling connection of existing project ${projectId} to repo: ${repositoryPath}`);
+      uiConcept.actions.showNotification({ message: `Connecting project to ${repositoryPath}...`, type: 'info' });
+
+      try {
+        const projectToUpdate = await storageConcept.actions.getProject(projectId);
+        if (!projectToUpdate) throw new Error('Project to connect not found.');
+
+        const provider = gitProvider.toLowerCase();
+        const adapter = { github: githubAdapter, gitlab: gitlabAdapter }[provider];
+        if (!adapter) throw new Error(`Provider "${gitProvider}" is not supported.`);
+
+        gitAbstractionConcept.actions.setProvider(provider, adapter);
+
+        let owner, repo;
+        try {
+          const url = new URL(repositoryPath);
+          [owner, repo] = url.pathname.split('/').filter(p => p);
+        } catch (e) {
+          [owner, repo] = repositoryPath.split('/');
+        }
+        if (!owner || !repo) throw new Error('Invalid repository path format. Must be "owner/repo" or a full URL.');
+
+        const repoInfo = await gitAbstractionConcept.actions.getRepoInfo(owner, repo, token);
+        const encryptedToken = await securityConcept.actions.encryptToken(token, password);
+
+        // --- FIX: Unlock the session with the provided token ---
+        // This makes the token available for the immediate sync trigger.
+        securityConcept.state.decryptedToken = token;
+
+        // Update the project object with Git details
+        projectToUpdate.gitProvider = gitProvider;
+        projectToUpdate.repositoryPath = `${owner}/${repo}`;
+        projectToUpdate.defaultBranch = repoInfo.default_branch;
+        projectToUpdate.encryptedToken = encryptedToken;
+        projectToUpdate.lastSyncSha = null; // Force a full pull on next sync
+        projectToUpdate.updatedAt = new Date();
+
+        await storageConcept.actions.updateProject(projectToUpdate);
+
+        // --- FIX: Synchronously update the project state to avoid race condition ---
+        const currentProjects = projectConcept.state.projects;
+        const projectIndex = currentProjects.findIndex(p => p.id === projectId);
+        if (projectIndex !== -1) {
+          currentProjects[projectIndex] = projectToUpdate;
+          projectConcept.actions.setProjects([...currentProjects]); // Re-render UI with updated project list
+        } else {
+          projectConcept.actions.loadProjects(); // Fallback to full reload if not found
+        }
+
+        uiConcept.actions.hideProjectSettingsModal();
+        uiConcept.actions.showNotification({ message: 'Project connected to Git successfully!', type: 'success' });
+
+        // --- FIX: Trigger a sync to push existing local diagrams to the new repo ---
+        syncConcept.actions.triggerSync();
+
+      } catch (error) {
+        console.error('[Sync] Failed to connect existing project to Git:', error);
+        uiConcept.actions.showNotification({ message: `Connection failed: ${error.message}`, type: 'error' });
       }
     },
   },

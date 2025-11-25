@@ -6,6 +6,7 @@ import { projectConcept } from '../src/concepts/projectConcept.js';
 import { diagramConcept } from '../src/concepts/diagramConcept.js';
 import { uiConcept } from '../src/concepts/uiConcept.js';
 import { securityConcept } from '../src/concepts/securityConcept.js';
+import { gitAbstractionConcept } from '../src/concepts/gitAbstractionConcept.js';
 
 // Import the wiring
 import { initializeApp, synchronizations } from '../src/synchronizations.js';
@@ -15,6 +16,7 @@ import { initializeApp, synchronizations } from '../src/synchronizations.js';
 let mockDbStore = {};
 let mockRequests = [];
 let mockElements = {};
+let syncTriggered = false;
 
 function createMockRequest(result) {
     const req = { result, onsuccess: null, onerror: null };
@@ -38,6 +40,8 @@ function setupAllMocks() {
     mockDbStore = {};
     mockRequests = [];
     mockElements = {};
+    syncTriggered = false;
+    global.confirm = () => true; // Auto-confirm any confirmation dialogs
 
     // Mock JSZip for the download test
     global.JSZip = class {
@@ -66,10 +70,20 @@ function setupAllMocks() {
                 // Mock for creating/updating items (used by saveDiagram)
                 put: (data) => {
                     if (!mockDbStore[name]) mockDbStore[name] = [];
-                    // A simple put mock: just add it. A real one would handle updates.
-                    const id = data.id || mockDbStore[name].length + 1;
-                    mockDbStore[name].push({ ...data, id });
+                    let id = data.id;
+                    const existingIndex = id ? mockDbStore[name].findIndex(item => item.id === id) : -1;
+                    if (existingIndex > -1) {
+                        mockDbStore[name][existingIndex] = { ...mockDbStore[name][existingIndex], ...data };
+                    } else {
+                        id = mockDbStore[name].length + 1;
+                        mockDbStore[name].push({ ...data, id });
+                    }
                     return createMockRequest(id);
+                },
+                get: (key) => createMockRequest(mockDbStore[name]?.find(item => item.id === key) || null),
+                delete: (key) => {
+                    mockDbStore[name] = (mockDbStore[name] || []).filter(item => item.id !== key);
+                    return createMockRequest(undefined);
                 },
                 // Mock for getting all items (used for projects)
                 getAll: () => createMockRequest(mockDbStore[name] || []),
@@ -78,6 +92,14 @@ function setupAllMocks() {
                     getAll: (key) => {
                         const results = (mockDbStore[name] || []).filter(item => item[indexName] === key);
                         return createMockRequest(results);
+                    }
+                }),
+                openCursor: (range) => ({
+                    onsuccess: (event) => {
+                        // Simplified mock: just resolve immediately as if all items were deleted.
+                        // A more complex mock could iterate, but this is sufficient for the test.
+                        const req = createMockRequest(null);
+                        flushMockRequests();
                     }
                 })
             }),
@@ -94,7 +116,7 @@ function setupAllMocks() {
     const ids = [
         'project-selector', 'diagram-list', 'sidebar-resizer', 'split-view-resizer',
         'project-sidebar', 'main-content', 'code-view', 'diagram-view', 'code-tab',
-        'diagram-tab', 'split-view-btn', 'sidebar-toggle-btn', 'new-project-btn',
+        'diagram-tab', 'split-view-btn', 'sidebar-toggle-btn', 'new-project-btn', 'project-settings-btn',
         'delete-project-btn', 'new-btn', 'save-btn', 'delete-btn', 'rename-btn',
         'export-mmd-btn', 'download-project-btn', 'code-editor', 'new-create-btn',
         'new-cancel-btn', 'render-btn'
@@ -127,10 +149,17 @@ function setupAllMocks() {
     // Mock Mermaid
     uiConcept.setMermaid({ parse: () => Promise.resolve(), render: () => Promise.resolve({ svg: '' }) });
 }
+function setupSyncTriggerSpy() {
+    const originalTrigger = syncConcept.actions.triggerSync;
+    syncConcept.actions.triggerSync = () => {
+        syncTriggered = true;
+        originalTrigger();
+    };
+}
 
 beforeEach(() => {
     // Reset all concepts to a clean state
-    const allConcepts = [storageConcept, projectConcept, diagramConcept, uiConcept, securityConcept];
+    const allConcepts = [storageConcept, projectConcept, diagramConcept, uiConcept, securityConcept, gitAbstractionConcept];
     allConcepts.forEach(c => {
       if (c.state) {
         Object.keys(c.state).forEach(key => {
@@ -143,6 +172,7 @@ beforeEach(() => {
 
     // Set up fresh mocks for the test
     setupAllMocks();
+    setupSyncTriggerSpy();
 
     // Initialize the app to connect all the concepts via synchronizations.js
     synchronizations.forEach((sync) => {
@@ -289,5 +319,99 @@ describe('UI -> File I/O Synchronizations', () => {
         assert.isNotNull(downloadFileSpy, 'downloadFile action should have been called');
         assert.strictEqual(downloadFileSpy.filename, 'my_test_project_project.zip', 'Download filename for the zip should be correct');
         assert.isTrue(downloadFileSpy.content.isMockBlob, 'Download content should be a (mocked) zip blob');
+    });
+
+    it('UI -> Project: Renaming a project should update its name in storage', async () => {
+        // Arrange
+        mockDbStore.projects = [{ id: 1, name: 'Old Name' }];
+        projectConcept.state.projects = mockDbStore.projects;
+        projectConcept.state.activeProjectId = 1;
+
+        // Act: Simulate user renaming the project in the settings modal
+        uiConcept.notify('ui:renameProjectConfirmed', { projectId: 1, newName: 'New Name' });
+        flushMockRequests(); // getAllProjects
+        flushMockRequests(); // updateProject
+        flushMockRequests(); // getAllProjects (from loadProjects)
+
+        // Assert
+        assert.strictEqual(mockDbStore.projects[0].name, 'New Name', 'Project name should be updated in the mock DB');
+    });
+
+    it('UI -> Project: Disconnecting a Git project should turn it into a local project', async () => {
+        // Arrange
+        const gitProject = {
+            id: 1,
+            name: 'Git Project',
+            gitProvider: 'github',
+            repositoryPath: 'owner/repo',
+            encryptedToken: { ciphertext: 'abc' }
+        };
+        mockDbStore.projects = [gitProject];
+        // Simulate the project being active in the settings modal
+        projectConcept.state.projects = [gitProject];
+
+        // Act: Simulate user confirming disconnect in the UI
+        uiConcept.notify('ui:disconnectProjectConfirmed', { projectId: 1 });
+        flushMockRequests(); // getProject
+        flushMockRequests(); // updateProject
+        flushMockRequests(); // getAllProjects (from loadProjects)
+
+        // Assert
+        const updatedProject = mockDbStore.projects.find(p => p.id === 1);
+        assert.strictEqual(updatedProject.gitProvider, 'local', 'Project provider should be changed to local');
+        assert.isNull(updatedProject.encryptedToken, 'Project should no longer have an encrypted token');
+    });
+
+    it('UI -> Project: Connecting a local project to Git should update its properties', async () => {
+        // Arrange
+        const localProject = { id: 1, name: 'Local Project', gitProvider: 'local', repositoryPath: null };
+        mockDbStore.projects = [localProject];
+        projectConcept.state.projects = [localProject];
+
+        const connectPayload = {
+            projectId: 1,
+            gitProvider: 'github',
+            repositoryPath: 'owner/repo',
+            token: 'fake-token',
+            password: 'fake-password',
+        };
+
+        // Mock successful API validation
+        gitAbstractionConcept.actions.getRepoInfo = () => Promise.resolve({ default_branch: 'main' });
+        securityConcept.actions.encryptToken = () => Promise.resolve({ ciphertext: 'encrypted' });
+
+        // Act
+        uiConcept.notify('ui:connectExistingLocalProjectConfirmed', connectPayload);
+        flushMockRequests(); // getProject
+        flushMockRequests(); // updateProject
+        flushMockRequests(); // setProjects
+
+        // Assert
+        const updatedProject = mockDbStore.projects.find(p => p.id === 1);
+        assert.strictEqual(updatedProject.gitProvider, 'github', 'Project provider should be updated to github');
+        assert.strictEqual(updatedProject.repositoryPath, 'owner/repo', 'Repository path should be set');
+        assert.isNotNull(updatedProject.encryptedToken, 'An encrypted token should now exist');
+        assert.isTrue(syncTriggered, 'A sync should be triggered after connecting a project');
+    });
+
+    it('UI -> Diagram: Deleting a local-only diagram should remove it from the sync queue', async () => {
+        // Arrange
+        projectConcept.state.activeProjectId = 1;
+        mockDbStore.diagrams = [{ id: 10, projectId: 1, title: 'local-only.mmd', lastModifiedRemoteSha: null }];
+        // This item was added to the queue when the diagram was first created
+        mockDbStore.syncQueue = [{ id: 100, diagramId: 10, action: 'create', payload: { title: 'local-only.mmd' } }];
+
+        // Act: Simulate user deleting the diagram
+        uiConcept.notify('ui:deleteDiagramClicked');
+        // The confirm() dialog is mocked to return true
+        flushMockRequests(); // getDiagram
+        flushMockRequests(); // getSyncQueueItems
+        flushMockRequests(); // deleteSyncQueueItem
+        flushMockRequests(); // deleteDiagram
+        flushMockRequests(); // getDiagramsByProjectId
+
+        // Assert
+        assert.strictEqual(mockDbStore.diagrams.length, 0, 'Diagram should be deleted from the database');
+        assert.strictEqual(mockDbStore.syncQueue.length, 0, 'The pending "create" action should be purged from the sync queue');
     });
 });

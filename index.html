@@ -22,7 +22,7 @@
         <div id="project-selector-container">
             <select id="project-selector" title="Project Selector"></select>
             <button id="new-project-btn" title="New Project">+</button>
-            <button id="delete-project-btn" title="Delete Project">🗑️</button>
+            <button id="project-settings-btn" title="Project Settings">⚙️</button>
         </div>
         <ul id="diagram-list">
             <!-- Diagram list items will be populated by JS -->
@@ -147,6 +147,57 @@
         <div class="modal-buttons">
             <button id="unlock-cancel-btn">Cancel</button>
             <button id="unlock-submit-btn">Unlock</button>
+        </div>
+    </div>
+</div>
+
+<!-- Project Settings Modal -->
+<div id="project-settings-modal" class="modal">
+    <div class="modal-content">
+        <h2>Project Settings</h2>
+        <p>Project Name: <strong id="settings-project-name-display"></strong></p>
+        <p>Provider: <span id="settings-project-provider-display"></span></p>
+        <p id="settings-repo-path-group" style="display: none;">Repository: <span id="settings-repo-path-display"></span></p>
+
+        <hr>
+        <h4>Rename Project</h4>
+        <label for="settings-rename-input">New Project Name</label>
+        <input type="text" id="settings-rename-input" placeholder="Enter new project name">
+        <button id="settings-rename-btn" class="button-primary">Rename</button>
+
+        <hr>
+        <div class="danger-zone">
+            <h4>Danger Zone</h4>
+            <button id="settings-disconnect-btn" class="button-danger" style="display: none;">Disconnect from Git</button>
+            <button id="settings-delete-btn" class="button-danger">Delete Project Locally</button>
+        </div>
+
+        <div id="settings-connect-to-git-section" style="display: none;">
+            <hr>
+            <h4>Connect to Git</h4>
+            <label for="settings-connect-provider">Git Provider</label>
+            <select id="settings-connect-provider">
+                <option value="github" selected>GitHub</option>
+                <option value="gitlab">GitLab</option>
+            </select>
+
+            <label for="settings-connect-repo-path">Repository Path (e.g., owner/repo)</label>
+            <input type="text" id="settings-connect-repo-path" placeholder="your-username/your-repo-name" required>
+
+            <label for="settings-connect-token">Personal Access Token</label>
+            <input type="password" id="settings-connect-token" placeholder="ghp_... or glpat_..." required>
+
+            <label for="settings-connect-password">Master Password</label>
+            <input type="password" id="settings-connect-password" required>
+
+            <label for="settings-connect-password-confirm">Confirm Master Password</label>
+            <input type="password" id="settings-connect-password-confirm" required>
+            <div id="settings-connect-password-error" style="color: var(--danger-color); font-size: 0.9rem; display: none;">Passwords do not match.</div>
+            <button id="settings-connect-submit-btn" class="button-primary">Save Connection</button>
+        </div>
+
+        <div class="modal-buttons">
+            <button id="settings-close-btn">Close</button>
         </div>
     </div>
 </div>

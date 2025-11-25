@@ -129,5 +129,9 @@ export const securityConcept = {
     subscribers.add(fn);
   },
 
+  unsubscribe(fn) {
+    subscribers.delete(fn);
+  },
+
   notify,
 };
