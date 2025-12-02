@@ -1,13 +1,16 @@
 /**
  * @module storageConcept
  * @description Manages all interactions with the browser's IndexedDB.
+ * It also handles normalization of data from JSON-LD to the internal simple JSON format.
  * This concept is responsible for opening the database, defining the schema,
  * and providing a connection handle for data operations. It follows the
  * "Concepts and Synchronizations" architecture.
  */
 
-const DB_NAME = 'MermaidSyncDB';
-const DB_VERSION = 1;
+import { normalizeDiagram, normalizeProject, toDiagramLD, toProjectLD } from '../utils/normalization.js';
+
+const DB_NAME = 'MermaidIDE'; // Changed name to match the one in synchronizations.js
+const DB_VERSION = 3; // Increment version for schema changes
 
 const subscribers = new Set();
 
@@ -47,15 +50,42 @@ export const storageConcept = {
         request.onupgradeneeded = (event) => {
           const db = event.target.result;
           console.log('[StorageConcept] Upgrade needed. Setting up schema...');
-          // Create object stores if they don't exist.
-          const projectsStore = db.createObjectStore('projects', { keyPath: 'id', autoIncrement: true });
-          projectsStore.createIndex('name', 'name', { unique: true });
 
-          const diagramsStore = db.createObjectStore('diagrams', { keyPath: 'id', autoIncrement: true });
-          diagramsStore.createIndex('projectId', 'projectId', { unique: false });
-          diagramsStore.createIndex('project_title', ['projectId', 'title'], { unique: true });
+          // --- FIX: Handle both fresh install and upgrade for schema changes ---
 
-          db.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true });
+          // --- Projects Store ---
+          let projectsStore;
+          if (!db.objectStoreNames.contains('projects')) {
+            projectsStore = db.createObjectStore('projects', { keyPath: 'id', autoIncrement: true });
+          } else {
+            projectsStore = event.target.transaction.objectStore('projects');
+          }
+          if (projectsStore.indexNames.contains('name')) projectsStore.deleteIndex('name'); // Clean up old index
+          if (projectsStore.indexNames.contains('schema:name')) projectsStore.deleteIndex('schema:name'); // Clean up invalid index attempt
+          if (!projectsStore.indexNames.contains('_name_for_index')) {
+            projectsStore.createIndex('_name_for_index', '_name_for_index', { unique: true });
+          }
+
+          // --- Diagrams Store ---
+          let diagramsStore;
+          if (!db.objectStoreNames.contains('diagrams')) {
+            diagramsStore = db.createObjectStore('diagrams', { keyPath: 'id', autoIncrement: true });
+          } else {
+            diagramsStore = event.target.transaction.objectStore('diagrams');
+          }
+          if (!diagramsStore.indexNames.contains('projectId')) {
+            diagramsStore.createIndex('projectId', 'projectId', { unique: false });
+          }
+          if (diagramsStore.indexNames.contains('project_title')) diagramsStore.deleteIndex('project_title'); // Clean up old index
+          if (diagramsStore.indexNames.contains('project_schema_name')) diagramsStore.deleteIndex('project_schema_name'); // Clean up invalid index attempt
+          if (!diagramsStore.indexNames.contains('project_name_for_index')) {
+            diagramsStore.createIndex('project_name_for_index', ['projectId', '_name_for_index'], { unique: true });
+          }
+
+          // --- SyncQueue Store ---
+          if (!db.objectStoreNames.contains('syncQueue')) {
+            db.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true });
+          }
         };
 
         // This event runs every time the DB is successfully opened, including on first creation.
@@ -117,7 +147,13 @@ export const storageConcept = {
      * Fetches all projects from the 'projects' object store.
      * @returns {Promise<any[]>}
      */
-    getAllProjects() { return storageConcept.actions._getAll('projects'); },
+    async getAllProjects() {
+      // --- FIX: Apply normalization to the results of _getAll ---
+      // The generic _getAll helper returns raw data. We must normalize it here
+      // before it's consumed by the rest of the application.
+      const rawProjects = await storageConcept.actions._getAll('projects');
+      return rawProjects.map(normalizeProject);
+    },
 
     /**
      * A generic helper to retrieve a single record by its key.
@@ -132,7 +168,12 @@ export const storageConcept = {
         const transaction = storageConcept.state.db.transaction(storeName, 'readonly');
         const store = transaction.objectStore(storeName);
         const request = store.get(key);
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+          // Apply normalization at the point of retrieval
+          if (storeName === 'projects') resolve(normalizeProject(request.result));
+          else if (storeName === 'diagrams') resolve(normalizeDiagram(request.result));
+          else resolve(request.result);
+        };
         request.onerror = (e) => reject(e.target.error);
       });
     },
@@ -180,9 +221,17 @@ export const storageConcept = {
      * @param {any} diagramData - The diagram object to add.
      * @returns {Promise<IDBValidKey>} The ID of the newly created diagram.
      */
-    addDiagram(diagramData) {
+    async addDiagram(diagramData) {
       console.log('[Storage] Adding/updating diagram in IndexedDB:', diagramData);
-      return storageConcept.actions._put('diagrams', diagramData);
+      // Ensure ID is present for conversion, even if it's undefined
+      const diagramWithId = { id: diagramData.id, ...diagramData };
+      const diagramLD = toDiagramLD(diagramWithId);
+      const newId = await storageConcept.actions._put('diagrams', diagramLD);
+      // The `put` operation might assign a new ID if one wasn't present.
+      // We need to update the @id field to match.
+      diagramLD.id = newId;
+      diagramLD['@id'] = `urn:mermaid-ide:diagram:${newId}`;
+      return storageConcept.actions._put('diagrams', diagramLD);
     },
 
     /**
@@ -197,7 +246,10 @@ export const storageConcept = {
      * @param {any} diagramData - The diagram object to update. It must have an 'id'.
      * @returns {Promise<IDBValidKey>} The ID of the updated diagram.
      */
-    updateDiagram(diagramData) { return storageConcept.actions._put('diagrams', diagramData); },
+    updateDiagram(diagramData) {
+      const diagramLD = toDiagramLD(diagramData);
+      return storageConcept.actions._put('diagrams', diagramLD);
+    },
 
     /**
      * Retrieves a single project by its ID.
@@ -218,14 +270,25 @@ export const storageConcept = {
      * @param {any} projectData - The project object to add.
      * @returns {Promise<IDBValidKey>} The ID of the newly created project.
      */
-    addProject(projectData) { return storageConcept.actions._put('projects', projectData); },
+    async addProject(projectData) {
+      console.log('[Storage] Creating project object in DB:', projectData); // <-- ADDED LOGGING
+      const projectWithId = { id: projectData.id, ...projectData };
+      const projectLD = toProjectLD(projectWithId);
+      const newId = await storageConcept.actions._put('projects', projectLD);
+      projectLD.id = newId;
+      projectLD['@id'] = `urn:mermaid-ide:project:${newId}`;
+      return storageConcept.actions._put('projects', projectLD);
+    },
 
     /**
      * Updates an existing project in the 'projects' object store.
      * @param {any} projectData - The project object to update. It must have an 'id'.
      * @returns {Promise<IDBValidKey>} The ID of the updated project.
      */
-    updateProject(projectData) { return storageConcept.actions._put('projects', projectData); },
+    updateProject(projectData) {
+      const projectLD = toProjectLD(projectData);
+      return storageConcept.actions._put('projects', projectLD);
+    },
 
     /**
      * Deletes a project from the 'projects' object store.
@@ -298,7 +361,7 @@ export const storageConcept = {
         const request = index.getAll(projectId);
 
         request.onsuccess = () => {
-          resolve(request.result);
+          resolve(request.result.map(normalizeDiagram));
         };
 
         request.onerror = (event) => {

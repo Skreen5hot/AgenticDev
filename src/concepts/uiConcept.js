@@ -5,6 +5,8 @@
  * for other concepts to trigger UI updates via the synchronization layer.
  */
 
+import { securityConcept } from './securityConcept.js';
+
 let mermaid = globalThis.mermaid;
 
 const subscribers = new Set();
@@ -319,6 +321,12 @@ function _showConnectProjectModal() {
         elements['connect-project-modal'].style.display = 'flex';
         // Reset form fields
         elements['connect-provider'].value = 'github'; // Default to GitHub
+
+        // --- FIX: Hide password fields if a session password is already set ---
+        const masterPasswordGroup = elements['connect-master-password-group'];
+        const sessionPasswordExists = securityConcept.state.sessionPassword;
+        masterPasswordGroup.style.display = sessionPasswordExists ? 'none' : 'block';
+
         ['connect-repo-path', 'connect-token', 'connect-password', 'connect-password-confirm'].forEach(id => elements[id].value = '');
         elements['connect-submit-btn'].disabled = true;
     }
@@ -532,7 +540,11 @@ function _attachEventListeners() {
         if (isLocal) {
             allFilled = connectLocalProjectNameInput.value.trim() !== '';
         } else {
-            allFilled = connectRepoPathInput.value.trim() !== '' && connectTokenInput.value.trim() !== '';
+            const sessionPasswordExists = securityConcept.state.sessionPassword;
+            const passwordFieldsRequired = !sessionPasswordExists;
+
+            allFilled = connectRepoPathInput.value.trim() !== '' && connectTokenInput.value.trim() !== '' &&
+                        (!passwordFieldsRequired || (connectPasswordInput.value && connectPasswordConfirmInput.value));
             passwordsMatch = connectPasswordInput.value === connectPasswordConfirmInput.value;
             connectPasswordError.style.display = (connectPasswordInput.value && connectPasswordConfirmInput.value && !passwordsMatch) ? 'block' : 'none';
         }

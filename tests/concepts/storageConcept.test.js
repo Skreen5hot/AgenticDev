@@ -1,6 +1,8 @@
 import { describe, it, assert, beforeEach } from '../test-utils.js';
 import { storageConcept } from '../../src/concepts/storageConcept.js';
 
+// Mock the normalization functions for testing purposes
+import { normalizeDiagram, normalizeProject } from '../../src/utils/normalization.js';
 // --- Mock IndexedDB ---
 
 let mockDbStore = {};
@@ -10,12 +12,14 @@ let nextId = 1;
 const mockIndexedDB = {
   open: (name, version) => {
     const request = {};
+    // Mock the DB object that gets returned
     const db = {
       objectStoreNames: {
         contains: (storeName) => !!mockDbStore[storeName],
       },
       createObjectStore: (storeName, options) => {
         if (!mockDbStore[storeName]) {
+          // Initialize store and its indexes
           mockDbStore[storeName] = [];
           mockDbIndexes[storeName] = {};
         }
@@ -28,20 +32,24 @@ const mockIndexedDB = {
       },
       transaction: (storeName) => ({
         objectStore: (name) => ({
-          put: (item) => {
+          put: (item) => { // Handles both add and update
             const req = {};
             const store = mockDbStore[name];
             let id = item.id;
-            if (id) {
-              const index = store.findIndex(i => i.id === id);
-              if (index > -1) store[index] = item;
-              else store.push(item);
-            } else {
+            if (options.autoIncrement && !id) { // For auto-incrementing stores
               id = nextId++;
               item.id = id;
               store.push(item);
+            } else if (id) { // For items with pre-defined IDs or updates
+              const index = store.findIndex(i => i.id === id);
+              if (index > -1) store[index] = item;
+              else store.push(item);
+            } else { // Fallback for non-auto-incrementing stores without an ID
+                id = nextId++; // Still assign an ID for mock consistency
+                item.id = id;
+                store.push(item);
             }
-            setTimeout(() => req.onsuccess({ target: { result: id } }), 0);
+            setTimeout(() => req.onsuccess({ target: { result: item.id || id } }), 0);
             return req;
           },
           get: (key) => {
@@ -124,6 +132,10 @@ describe('Storage Concept', () => {
     await storageConcept.actions.init();
   });
 
+  // Helper to check if an object is in simple JSON format (not JSON-LD)
+  const isSimpleJson = (obj) => !obj['@context'] && !obj['@type'];
+  const isJsonLd = (obj) => obj['@context'] && obj['@type'];
+
   describe('Project CRUD', () => {
     it('[UNIT] should add and get a project', async () => {
       const project = { name: 'Project Alpha' };
@@ -133,6 +145,40 @@ describe('Storage Concept', () => {
       const retrieved = await storageConcept.actions.getAllProjects();
       assert.strictEqual(retrieved.length, 1, 'Should have one project in the store');
       assert.strictEqual(retrieved[0].name, 'Project Alpha', 'Project name should match');
+      assert.isTrue(isSimpleJson(retrieved[0]), 'Retrieved project should be in simple JSON format');
+    });
+
+    it('[UNIT] should get a project and normalize JSON-LD data', async () => {
+      // Simulate a project stored in JSON-LD format
+      const jsonLdProject = {
+        id: 10, // Pre-defined ID for direct retrieval
+        "@context": "https://mermaid-ide.org/context/v1.jsonld",
+        "@id": "urn:mermaid-ide:project:10",
+        "@type": "bfo:BFO_0000027",
+        "schema:name": "JSON-LD Project",
+        "gitProvider": "github",
+        "repositoryPath": "test/repo",
+        "defaultBranch": "main",
+        "lastSyncSha": "abc",
+        "encryptedToken": { "ciphertext": "xyz" },
+        "schema:dateCreated": "2023-01-01T00:00:00Z",
+        "schema:dateModified": "2023-01-02T00:00:00Z"
+      };
+      mockDbStore.projects.push(jsonLdProject);
+
+      const retrieved = await storageConcept.actions.getProject(10);
+      assert.isNotNull(retrieved, 'Project should be retrieved');
+      assert.isTrue(isSimpleJson(retrieved), 'Retrieved project should be in simple JSON format');
+      assert.strictEqual(retrieved.id, 10, 'ID should be correctly parsed');
+      assert.strictEqual(retrieved.name, 'JSON-LD Project', 'Name should be correctly parsed');
+      assert.strictEqual(retrieved.gitProvider, 'github', 'gitProvider should be preserved');
+      assert.strictEqual(retrieved.repositoryPath, 'test/repo', 'repositoryPath should be preserved');
+      assert.strictEqual(retrieved.defaultBranch, 'main', 'defaultBranch should be preserved');
+      assert.strictEqual(retrieved.lastSyncSha, 'abc', 'lastSyncSha should be preserved');
+      assert.deepStrictEqual(retrieved.encryptedToken, { "ciphertext": "xyz" }, 'encryptedToken should be preserved');
+      assert.instanceOf(retrieved.createdAt, Date, 'createdAt should be a Date object');
+      assert.instanceOf(retrieved.updatedAt, Date, 'updatedAt should be a Date object');
+      assert.strictEqual(retrieved.createdAt.toISOString(), '2023-01-01T00:00:00.000Z', 'createdAt should match');
     });
 
     it('[UNIT] should update a project', async () => {
@@ -159,10 +205,60 @@ describe('Storage Concept', () => {
   describe('Diagram CRUD', () => {
     it('[UNIT] should add and get a diagram', async () => {
       const diagram = { title: 'Diagram 1', projectId: 1 };
-      const id = await storageConcept.actions.addDiagram(diagram);
+      const id = await storageConcept.actions.addDiagram(diagram); // ID will be 1
 
-      const retrieved = await storageConcept.actions.getDiagram(id);
-      assert.strictEqual(retrieved.title, 'Diagram 1', 'Diagram title should match');
+      const retrieved = await storageConcept.actions.getDiagram(1);
+      assert.isNotNull(retrieved, 'Diagram should be retrieved');
+      assert.strictEqual(retrieved.title, 'Diagram 1', 'Normalized diagram title should match');
+      assert.isTrue(isSimpleJson(retrieved), 'Retrieved diagram should be in simple JSON format');
+
+      // Verify that the data was WRITTEN in JSON-LD format
+      const rawData = mockDbStore.diagrams.find(d => d.id === 1);
+      assert.isTrue(isJsonLd(rawData), 'Raw data in DB should be in JSON-LD format');
+      assert.strictEqual(rawData['@type'], 'bfo:BFO_0000031', 'Raw data should have correct @type');
+      assert.strictEqual(rawData['schema:name'], 'Diagram 1', 'Raw data should have schema:name');
+      assert.strictEqual(rawData['@id'], 'urn:mermaid-ide:diagram:1', 'Raw data should have correct @id');
+    });
+
+    it('[UNIT] should get a diagram and normalize JSON-LD data', async () => {
+      // Simulate a diagram stored in JSON-LD format
+      const jsonLdDiagram = {
+        id: 20, // Pre-defined ID for direct retrieval
+        "@context": "https://mermaid-ide.org/context/v1.jsonld",
+        "@id": "urn:mermaid-ide:diagram:20",
+        "@type": "bfo:BFO_0000031",
+        "schema:name": "JSON-LD Diagram.mmd",
+        "schema:text": "graph TD; A-->B;",
+        "bfo:BFO_0000129": { "@id": "urn:mermaid-ide:project:5" },
+        "lastModifiedRemoteSha": "xyz",
+        "schema:dateCreated": "2023-03-01T10:00:00Z",
+        "schema:dateModified": "2023-03-02T11:00:00Z"
+      };
+      mockDbStore.diagrams.push(jsonLdDiagram);
+
+      const retrieved = await storageConcept.actions.getDiagram(20);
+      assert.isNotNull(retrieved, 'Diagram should be retrieved');
+      assert.isTrue(isSimpleJson(retrieved), 'Retrieved diagram should be in simple JSON format');
+      assert.strictEqual(retrieved.id, 20, 'ID should be correctly parsed');
+      assert.strictEqual(retrieved.title, 'JSON-LD Diagram.mmd', 'Title should be correctly parsed');
+      assert.strictEqual(retrieved.content, 'graph TD; A-->B;', 'Content should be correctly parsed');
+      assert.strictEqual(retrieved.projectId, 5, 'projectId should be correctly parsed');
+      assert.strictEqual(retrieved.lastModifiedRemoteSha, 'xyz', 'lastModifiedRemoteSha should be preserved');
+      assert.instanceOf(retrieved.createdAt, Date, 'createdAt should be a Date object');
+      assert.instanceOf(retrieved.updatedAt, Date, 'updatedAt should be a Date object');
+      assert.strictEqual(retrieved.createdAt.toISOString(), '2023-03-01T10:00:00.000Z', 'createdAt should match');
+    });
+
+    it('[UNIT] should get diagrams by project ID and normalize JSON-LD data', async () => {
+      mockDbStore.diagrams.push({ id: 1, title: 'D1', projectId: 1 }); // Simple JSON
+      mockDbStore.diagrams.push({ id: 2, "@context": "url", "@type": "bfo:BFO_0000031", "@id": "urn:diagram:2", "bfo:BFO_0000129": { "@id": "urn:project:1" }, "schema:name": "D2.mmd", "schema:text": "content" }); // JSON-LD
+      mockDbStore.diagrams.push({ id: 3, title: 'D3', projectId: 2 }); // Simple JSON
+
+      const project1Diagrams = await storageConcept.actions.getDiagramsByProjectId(1);
+      assert.strictEqual(project1Diagrams.length, 2, 'Should retrieve 2 diagrams for project 1');
+      assert.isTrue(isSimpleJson(project1Diagrams[0]), 'First diagram should be normalized');
+      assert.isTrue(isSimpleJson(project1Diagrams[1]), 'Second diagram should be normalized');
+      assert.strictEqual(project1Diagrams[1].title, 'D2.mmd', 'Normalized title should be correct');
     });
 
     it('[UNIT] should get diagrams by project ID', async () => {

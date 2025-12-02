@@ -39,7 +39,9 @@ export const synchronizations = [
         };
         await storageConcept.actions.addProject(defaultProject);
         // After creating the default project, reload projects to get its ID, then create a default diagram.
-        const reloadedProjects = await storageConcept.actions.getAllProjects();
+        // --- FIX: The projects are already normalized by getAllProjects, so we can use them directly.
+        // This prevents a race condition where the state might not be updated before the next action.
+        const reloadedProjects = await storageConcept.actions.getAllProjects(); 
         projectConcept.actions.setProjects(reloadedProjects);
         if (reloadedProjects.length > 0) {
           const defaultProjectId = reloadedProjects[0].id;
@@ -69,7 +71,7 @@ export const synchronizations = [
 
         console.log(`[Sync] Project ${project.id} selected. Loading its diagrams.`);
         // For remote projects, if the session is not already unlocked, prompt the user for the password.
-        if (provider !== 'local' && !securityConcept.state.decryptedToken) {
+        if (provider !== 'local' && !securityConcept.state.sessionPassword) {
           console.log('[Sync] Session is locked. Showing unlock modal.');
           uiConcept.actions.showUnlockSessionModal({ projectName: project.name });
           return; // Stop further processing until unlocked
@@ -261,13 +263,17 @@ export const synchronizations = [
           const defaultBranch = repoInfo.default_branch;
           console.log(`[Sync] Repository validated. Default branch: ${defaultBranch}.`);
 
-          // 3. Encrypt the token
-          const encryptedToken = await securityConcept.actions.encryptToken(token, password);
-          console.log('[Sync] Token encrypted successfully.');
+          // 3. Encrypt the token using the provided password and set it for the session.
+          // --- FIX: Enforce a single global master password ---
+          // If a session password already exists, use it. Otherwise, use the one provided.
+          const sessionPassword = password || securityConcept.state.sessionPassword;
+          if (!sessionPassword) throw new Error("A master password is required.");
+          // If this is the first Git project, set the global session password.
+          if (!securityConcept.state.sessionPassword) securityConcept.actions.setSessionPassword(sessionPassword);
 
-          // --- FIX: Unlock the session with the provided token for immediate use ---
-          // This makes the token available for the initial sync.
-          securityConcept.state.decryptedToken = token;
+          // Always encrypt with the session password to enforce a single global password.
+          const encryptedToken = await securityConcept.actions.encryptToken(token, sessionPassword);
+          console.log('[Sync] Token encrypted successfully.');
 
           // 4. Prepare the project object for storage
           newProject = {
@@ -557,11 +563,18 @@ export const synchronizations = [
       if (!project) return;
 
       try {
-        console.log(`[Sync] Attempting to decrypt token for project "${project.name}"...`);
-        await securityConcept.actions.decryptToken(project.encryptedToken, password);
+        // --- FIX: With a global password, "unlocking" means setting the session password ---
+        // We verify the password by trying to decrypt the *current* project's token.
+        console.log(`[Sync] Verifying master password against project "${project.name}"...`);
+        await securityConcept.actions.decryptToken(project.encryptedToken, password); // This will throw on failure
+
+        // If successful, set the password for the session.
+        securityConcept.actions.setSessionPassword(password);
+        console.log('[Sync] Master password verified. Session is unlocked.');
+
         uiConcept.actions.hideUnlockSessionModal();
-        // Now that we are unlocked, proceed with loading the diagrams for the selected project.
-        diagramConcept.actions.loadDiagramsForProject({ projectId: project.id });
+        // Trigger a sync, which will now succeed for any project.
+        syncConcept.actions.triggerSync();
       } catch (error) {
         // The decryptToken action already logs the error, so we just update the UI.
         const errorEl = document.getElementById('unlock-error');

@@ -149,6 +149,10 @@ function setupAllMocks() {
     // Mock Mermaid
     uiConcept.setMermaid({ parse: () => Promise.resolve(), render: () => Promise.resolve({ svg: '' }) });
 }
+
+function getMockElement(id) {
+    return mockElements[id] || { style: {}, addEventListener: () => {}, classList: { add: () => {}, remove: () => {} } };
+}
 function setupSyncTriggerSpy() {
     const originalTrigger = syncConcept.actions.triggerSync;
     syncConcept.actions.triggerSync = () => {
@@ -208,6 +212,7 @@ describe('Synchronizations (Integration Tests)', () => {
         // Arrange: Simulate a UI event for creating a new project
         const projectDetails = { gitProvider: 'github', repositoryPath: 'test/repo', token: 't', password: 'p' };
 
+        gitAbstractionConcept.actions.getRepoInfo = () => Promise.resolve({ default_branch: 'main' });
         // Act
         uiConcept.notify('ui:connectProjectClicked', projectDetails);
         flushMockRequests(); // Flush the 'add' request for the new project
@@ -215,7 +220,7 @@ describe('Synchronizations (Integration Tests)', () => {
 
         // Assert
         assert.strictEqual(mockDbStore.projects.length, 1, 'There should be one project in the mock DB');
-        assert.strictEqual(mockDbStore.projects[0].name, 'test/repo', 'The new project should be in the mock DB');
+        assert.strictEqual(mockDbStore.projects[0]['schema:name'], 'test/repo', 'The new project should be in the mock DB');
     });
 
     it('Storage -> Project -> Diagram: Initial load with empty DB should create a default project and diagram', async () => {
@@ -234,9 +239,9 @@ describe('Synchronizations (Integration Tests)', () => {
 
         // Assert
         assert.strictEqual(mockDbStore.projects.length, 1, 'A default project should be created');
-        assert.strictEqual(mockDbStore.projects[0].name, 'Default Project', 'The project should be named "Default Project"');
+        assert.strictEqual(mockDbStore.projects[0]['schema:name'], 'Default Project', 'The project should be named "Default Project"');
         assert.strictEqual(mockDbStore.diagrams.length, 1, 'A default diagram should be created');
-        assert.strictEqual(mockDbStore.diagrams[0].title, 'example.mmd', 'The diagram should be named "example.mmd"');
+        assert.strictEqual(mockDbStore.diagrams[0]['schema:name'], 'example.mmd', 'The diagram should be named "example.mmd"');
     });
 
     it('UI -> Diagram -> UI: Creating a new diagram should auto-select it and populate the editor', async () => {
@@ -253,7 +258,7 @@ describe('Synchronizations (Integration Tests)', () => {
         assert.ok(diagramState.activeDiagram, 'An active diagram should be set');
         assert.strictEqual(diagramState.activeDiagram.title, 'My Auto-Selected Diagram', 'The correct diagram should be selected');
 
-        const editor = mockElements['code-editor'];
+        const editor = getMockElement('code-editor');
         assert.strictEqual(editor.value, diagramState.activeDiagram.content, 'Editor should be populated with the new diagram content');
         
         assert.ok(editor._isFocused, 'Editor should be focused after the new diagram is loaded');
@@ -334,7 +339,7 @@ describe('UI -> File I/O Synchronizations', () => {
         flushMockRequests(); // getAllProjects (from loadProjects)
 
         // Assert
-        assert.strictEqual(mockDbStore.projects[0].name, 'New Name', 'Project name should be updated in the mock DB');
+        assert.strictEqual(mockDbStore.projects[0]['schema:name'], 'New Name', 'Project name should be updated in the mock DB');
     });
 
     it('UI -> Project: Disconnecting a Git project should turn it into a local project', async () => {
@@ -413,5 +418,66 @@ describe('UI -> File I/O Synchronizations', () => {
         // Assert
         assert.strictEqual(mockDbStore.diagrams.length, 0, 'Diagram should be deleted from the database');
         assert.strictEqual(mockDbStore.syncQueue.length, 0, 'The pending "create" action should be purged from the sync queue');
+    });
+});
+
+describe('Global Password Architecture (Integration Tests)', () => {
+    it('Creating a second Git project should reuse the session password', async () => {
+        let firstPasswordUsed = '';
+        let secondPasswordUsed = '';
+
+        // Arrange: Spy on encryptToken to capture the password used
+        const originalEncrypt = securityConcept.actions.encryptToken;
+        securityConcept.actions.encryptToken = (token, password) => {
+            if (!firstPasswordUsed) firstPasswordUsed = password;
+            else secondPasswordUsed = password;
+            return originalEncrypt(token, password);
+        };
+        gitAbstractionConcept.actions.getRepoInfo = () => Promise.resolve({ default_branch: 'main' });
+
+        // Act 1: Create the first project, which sets the session password
+        const project1Details = { gitProvider: 'github', repositoryPath: 'owner/repo1', token: 't1', password: 'my-global-password' };
+        uiConcept.notify('ui:connectProjectClicked', project1Details);
+        flushMockRequests(); // addProject
+        flushMockRequests(); // getAllProjects
+
+        // Act 2: Create the second project WITHOUT providing a password
+        const project2Details = { gitProvider: 'github', repositoryPath: 'owner/repo2', token: 't2' }; // No password
+        uiConcept.notify('ui:connectProjectClicked', project2Details);
+        flushMockRequests(); // addProject
+        flushMockRequests(); // getAllProjects
+
+        // Assert
+        assert.strictEqual(firstPasswordUsed, 'my-global-password', 'First project should use the provided password');
+        assert.strictEqual(secondPasswordUsed, 'my-global-password', 'Second project should reuse the password from the session');
+        assert.strictEqual(securityConcept.state.sessionPassword, 'my-global-password', 'Session password should be set');
+    });
+
+    it('Switching between two Git projects should not require re-authentication if session is unlocked', async () => {
+        let unlockModalShown = false;
+        uiConcept.actions.showUnlockSessionModal = () => { unlockModalShown = true; };
+
+        // Arrange: Set up two Git projects and an unlocked session
+        const project1 = { id: 1, name: 'Project A', gitProvider: 'github', encryptedToken: { data: 'abc' } };
+        const project2 = { id: 2, name: 'Project B', gitProvider: 'github', encryptedToken: { data: 'xyz' } };
+        projectConcept.state.projects = [project1, project2];
+        securityConcept.state.sessionPassword = 'my-global-password'; // Session is unlocked
+
+        // Act 1: Select the first project
+        projectConcept.actions.setActiveProject(1);
+        flushMockRequests();
+
+        // Assert 1
+        assert.isFalse(unlockModalShown, 'Unlock modal should NOT be shown for Project A');
+        assert.isTrue(syncTriggered, 'Sync should be triggered for Project A');
+
+        // Act 2: Select the second project
+        syncTriggered = false; // Reset spy
+        projectConcept.actions.setActiveProject(2);
+        flushMockRequests();
+
+        // Assert 2
+        assert.isFalse(unlockModalShown, 'Unlock modal should NOT be shown for Project B');
+        assert.isTrue(syncTriggered, 'Sync should be triggered for Project B');
     });
 });

@@ -6,6 +6,20 @@
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
+/**
+ * A robust, Unicode-safe Base64 encoder.
+ * The native btoa() function fails on strings containing characters outside of the Latin1 range.
+ * This function correctly handles Unicode by first encoding the string as UTF-8.
+ * @param {string} str The string to encode.
+ * @returns {string} The Base64 encoded string.
+ */
+function unicodeBtoa(str) {
+  // First, encode the string into a sequence of UTF-8 bytes.
+  const utf8Bytes = new TextEncoder().encode(str);
+  // Then, convert the byte array to a binary string and Base64 encode it.
+  return btoa(String.fromCharCode.apply(null, utf8Bytes));
+}
+
 const _sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
@@ -161,7 +175,7 @@ export const githubAdapter = {
     const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`;
     const body = {
       message,
-      content: btoa(content), // Content must be base64 encoded.
+      content: unicodeBtoa(content), // Content must be base64 encoded.
       sha, // If sha is null, GitHub treats it as a new file create.
     };
     return _githubFetch(url, token, {

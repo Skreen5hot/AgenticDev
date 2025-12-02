@@ -1,0 +1,17 @@
+{
+  "@context": {
+    "bfo": "http://purl.obolibrary.org/obo/",
+    "schema": "https://schema.org/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+
+    "Project": "bfo:BFO_0000027",
+    "Diagram": "bfo:BFO_0000031",
+
+    "name": "schema:name",
+    "content": "schema:text",
+    "createdAt": { "@id": "schema:dateCreated", "@type": "xsd:dateTime" },
+    "updatedAt": { "@id": "schema:dateModified", "@type": "xsd:dateTime" },
+    "hasMember": { "@id": "bfo:BFO_0000115", "@type": "@id" },
+    "isMemberOf": { "@id": "bfo:BFO_0000129", "@type": "@id" }
+  }
+}

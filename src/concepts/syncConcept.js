@@ -71,10 +71,10 @@ export const syncConcept = {
       }
       // We need the active project and token to perform a sync.
       // This will be provided by the synchronization layer.
-      const activeProjectId = projectConcept.state.activeProjectId;
-      const decryptedToken = securityConcept.state.decryptedToken;
+      const activeProject = projectConcept.state.projects.find(p => p.id === projectConcept.state.activeProjectId);
+      const sessionPassword = securityConcept.state.sessionPassword;
 
-      if (activeProjectId && decryptedToken) {
+      if (activeProject && (activeProject.gitProvider === 'local' || sessionPassword)) {
         syncConcept.actions._performSync();
       } else {
         console.log('[SyncConcept] Skipping sync: No active project or session is not unlocked.');
@@ -94,15 +94,19 @@ export const syncConcept = {
 
       try {
         const project = projectConcept.state.projects.find(p => p.id === projectConcept.state.activeProjectId);
-        const token = securityConcept.state.decryptedToken;
 
         // --- NEW: Guard against trying to sync local projects ---
-        if (project && project.gitProvider === 'local') {
+        if (!project) throw new Error('Sync failed: No active project.');
+        if (project.gitProvider === 'local') {
           console.log('[SyncConcept] Skipping sync for local project.');
           return; // Exit early, nothing to sync.
         }
 
-        if (!project || !token) throw new Error('Sync failed: No active project or session is unlocked.');
+        // --- FIX: Decrypt the project-specific token on-demand using the session password ---
+        const sessionPassword = securityConcept.state.sessionPassword;
+        if (!sessionPassword) throw new Error('Sync failed: Session is locked.');
+
+        const token = await securityConcept.actions.decryptToken(project.encryptedToken, sessionPassword);
 
         const [owner, repo] = project.repositoryPath.split('/');
         const diagramsPath = 'mermaid'; // Standard directory for diagrams

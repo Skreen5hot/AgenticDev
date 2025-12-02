@@ -54,6 +54,7 @@ export const securityConcept = {
   state: {
     /** @type {string | null} */
     decryptedToken: null,
+    sessionPassword: null,
   },
 
   actions: {
@@ -122,6 +123,15 @@ export const securityConcept = {
       securityConcept.state.decryptedToken = null;
       notify('sessionLocked');
       console.log('[SecurityConcept] In-memory token has been cleared.');
+    },
+
+    /**
+     * Stores the master password for the current session.
+     * @param {string} password - The master password.
+     */
+    setSessionPassword(password) {
+      securityConcept.state.sessionPassword = password;
+      notify('sessionPasswordSet');
     },
   },
 
