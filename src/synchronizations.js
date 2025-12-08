@@ -79,6 +79,11 @@ export const synchronizations = [
           // For local projects, or unlocked remote projects, load the diagrams immediately.
           console.log('[Sync] Project is local or session is unlocked. Proceeding to load diagrams.');
           diagramConcept.actions.loadDiagramsForProject({ projectId: project.id });
+          // --- FIX: Ensure the UI selector is updated after a project is successfully selected ---
+          uiConcept.actions.renderProjectSelector({
+            projects: projectConcept.state.projects,
+            activeProjectId: project.id,
+          });
         }
       } else {
         // Handle case where project is deselected
@@ -292,23 +297,21 @@ export const synchronizations = [
         const newProjectId = await storageConcept.actions.addProject(newProject); // Capture the new ID
         console.log('[Sync] New project saved successfully.');
 
-        // --- FIX: Await the project list reload to prevent a race condition ---
-        // 6. Create a promise that resolves when projects are loaded.
+        // --- FIX: Reload the project list to get the final state from the DB ---
+        // We create a promise that resolves only when the projects are fully loaded into state.
         const projectsLoadedPromise = new Promise(resolve => {
           const tempSub = (event, payload) => {
             if (event === 'projectsLoaded') {
-              projectConcept.unsubscribe(tempSub); // Clean up the temporary subscriber
+              projectConcept.unsubscribe(tempSub);
               resolve(payload);
             }
           };
           projectConcept.subscribe(tempSub);
         });
-
-        // 7. Trigger the reload and wait for it to complete.
         projectConcept.actions.loadProjects();
         await projectsLoadedPromise;
 
-        // 8. Now that the state is updated, set the newly created project as active.
+        // 8. Now that the state is guaranteed to be fresh, set the newly created project as active.
         projectConcept.actions.setActiveProject(newProjectId);
 
         // --- FIX: Trigger an initial sync to pull diagrams from the new repo ---
@@ -756,11 +759,13 @@ export const synchronizations = [
         if (!owner || !repo) throw new Error('Invalid repository path format. Must be "owner/repo" or a full URL.');
 
         const repoInfo = await gitAbstractionConcept.actions.getRepoInfo(owner, repo, token);
-        const encryptedToken = await securityConcept.actions.encryptToken(token, password);
 
-        // --- FIX: Unlock the session with the provided token ---
-        // This makes the token available for the immediate sync trigger.
-        securityConcept.state.decryptedToken = token;
+        // --- FIX: Enforce global master password ---
+        const sessionPassword = password || securityConcept.state.sessionPassword;
+        if (!sessionPassword) throw new Error("A master password is required.");
+        if (!securityConcept.state.sessionPassword) securityConcept.actions.setSessionPassword(sessionPassword);
+
+        const encryptedToken = await securityConcept.actions.encryptToken(token, sessionPassword);
 
         // Update the project object with Git details
         projectToUpdate.gitProvider = gitProvider;

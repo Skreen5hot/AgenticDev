@@ -119,12 +119,17 @@
                 <p>This password encrypts your token in the browser. It is never stored or sent anywhere.</p>
 
                 <label for="connect-password">Master Password</label>
+                <input type="password" id="connect-password-single" style="display: none;" required>
+
+                <div id="connect-password-creation-group">
+                    <label for="connect-password">Master Password</label>
                 <input type="password" id="connect-password" required>
 
                 <label for="connect-password-confirm">Confirm Master Password</label>
                 <input type="password" id="connect-password-confirm" required>
                 <div id="connect-password-error" style="color: var(--danger-color); font-size: 0.9rem; display: none;">Passwords do not match.</div>
             </div>
+        </div>
         </div>
 
         <div class="modal-buttons">

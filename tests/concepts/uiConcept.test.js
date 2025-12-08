@@ -1,5 +1,7 @@
 import { describe, it, assert, beforeEach } from '../test-utils.js';
 import { uiConcept } from '../../src/concepts/uiConcept.js';
+import { projectConcept } from '../../src/concepts/projectConcept.js';
+import { securityConcept } from '../../src/concepts/securityConcept.js';
 
 // --- Mocks for Browser Environment ---
 
@@ -13,7 +15,8 @@ function setupMockDOM() {
         'connect-password', 'connect-password-confirm', 'connect-password-error',
         'connect-submit-btn', 'connect-local-project-name', 'connect-local-project-name-group',
         'connect-git-fields-group', 'connect-master-password-group',
-        'unlock-session-modal', 'unlock-project-name', 'unlock-password', 'unlock-error',
+        'connect-password-single', 'connect-password-creation-group',
+        'unlock-session-modal', 'unlock-project-name', 'unlock-password', 'unlock-error', 
         'unlock-submit-btn',
         'toast-container', 'split-view-btn',
         'content-area', 'code-tab', 'diagram-tab', 'code-view', 'diagram-view', 'fullscreen-btn'
@@ -180,7 +183,7 @@ describe('UI Concept', () => {
     describe('Connect Project Modal Logic', () => {
         let connectProviderSelect, connectLocalProjectNameInput, connectLocalProjectNameGroup,
             connectGitFieldsGroup, connectMasterPasswordGroup, connectRepoPathInput, connectTokenInput,
-            connectPasswordInput, connectPasswordConfirmInput, connectPasswordError, connectSubmitBtn;
+            connectPasswordInput, connectPasswordConfirmInput, connectPasswordError, connectSubmitBtn, connectPasswordSingle, connectPasswordCreationGroup;
 
         beforeEach(() => {
             // Cache elements for easier access in these tests
@@ -195,6 +198,8 @@ describe('UI Concept', () => {
             connectPasswordConfirmInput = mockElements['connect-password-confirm'];
             connectPasswordError = mockElements['connect-password-error'];
             connectSubmitBtn = mockElements['connect-submit-btn'];
+            connectPasswordSingle = mockElements['connect-password-single'];
+            connectPasswordCreationGroup = mockElements['connect-password-creation-group'];
 
             // Ensure modal is shown and initial state is set
             uiConcept.actions.showConnectProjectModal();
@@ -205,6 +210,55 @@ describe('UI Concept', () => {
             assert.strictEqual(connectLocalProjectNameGroup.style.display, 'none', 'Local name group should be hidden');
             assert.strictEqual(connectGitFieldsGroup.style.display, 'block', 'Git fields group should be visible');
             assert.strictEqual(connectMasterPasswordGroup.style.display, 'block', 'Master password group should be visible');
+            assert.strictEqual(connectPasswordSingle.style.display, 'none', 'Single password field should be hidden');
+            assert.strictEqual(connectPasswordCreationGroup.style.display, 'block', 'Password creation group should be visible');
+        });
+
+        it('[UI-STATE] should show a single password field if other Git projects exist but session is locked', () => {
+            // Arrange: Simulate a locked session with an existing Git project
+            securityConcept.state.sessionPassword = null;
+            projectConcept.state.projects = [{ id: 1, name: 'Existing Git Project', gitProvider: 'github' }];
+
+            // Act: Show the modal
+            uiConcept.actions.showConnectProjectModal();
+
+            // Assert
+            assert.strictEqual(connectMasterPasswordGroup.style.display, 'block', 'Master password group should be visible');
+            assert.strictEqual(connectPasswordSingle.style.display, 'block', 'Single password field should be visible');
+            assert.strictEqual(connectPasswordCreationGroup.style.display, 'none', 'Password creation group should be hidden');
+        });
+
+        it('[UI-STATE] should reset to the default Git view when re-opened after being in the Local view', () => {
+            // Arrange: First, switch the modal to the "Local" state
+            connectProviderSelect.value = 'local';
+            connectProviderSelect._trigger('change');
+            assert.strictEqual(connectGitFieldsGroup.style.display, 'none', 'Pre-condition: Git fields should be hidden');
+
+            // Act: Hide and then re-show the modal
+            uiConcept.actions.hideConnectProjectModal();
+            uiConcept.actions.showConnectProjectModal();
+
+            // Assert: The modal should be reset to its default Git state
+            assert.strictEqual(connectProviderSelect.value, 'github', 'Provider should reset to github');
+            assert.strictEqual(connectGitFieldsGroup.style.display, 'block', 'Git fields should become visible again');
+            assert.strictEqual(connectLocalProjectNameGroup.style.display, 'none', 'Local name group should be hidden again');
+        });
+
+        it('[UI-STATE] should HIDE password fields when a session password already exists', () => {
+            // Arrange: Set a session password, simulating an already-unlocked session
+            securityConcept.state.sessionPassword = 'my-global-password';
+    
+            // Act: Re-show the modal to trigger the visibility logic
+            uiConcept.actions.showConnectProjectModal();
+    
+            // Assert
+            assert.strictEqual(connectMasterPasswordGroup.style.display, 'none', 'Password fields should be hidden');
+        });
+
+        it('[UI-STATE] should SHOW password fields when no session password exists', () => {
+            securityConcept.state.sessionPassword = null;
+            uiConcept.actions.showConnectProjectModal();
+            assert.strictEqual(connectMasterPasswordGroup.style.display, 'block', 'Password fields should be visible');
         });
 
         it('[UNIT] should show Local fields and hide Git fields when "Local" is selected', () => {
@@ -270,6 +324,20 @@ describe('UI Concept', () => {
 
             assert.isFalse(connectSubmitBtn.disabled, 'Submit button should be enabled if all Git fields are valid');
             assert.strictEqual(connectPasswordError.style.display, 'none', 'Password error should be hidden');
+        });
+
+        it('[UI-STATE] should enable submit button for Git project if session is unlocked and fields are filled', () => {
+            // Arrange: Simulate an unlocked session
+            securityConcept.state.sessionPassword = 'my-global-password';
+            uiConcept.actions.showConnectProjectModal(); // Re-show modal to apply state
+
+            // Act
+            connectRepoPathInput.value = 'owner/repo';
+            connectTokenInput.value = 'token';
+            connectTokenInput._trigger('input'); // Trigger input event
+
+            // Assert
+            assert.isFalse(connectSubmitBtn.disabled, 'Submit button should be enabled without password input');
         });
 
         it('[UNIT] should notify with correct payload for local project creation', () => {

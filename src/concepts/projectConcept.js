@@ -73,7 +73,7 @@ export const projectConcept = {
      * Initiates the loading of all projects from storage.
      */
     loadProjects() {
-      notify('projectsLoadRequested');
+      return notify('projectsLoadRequested');
     },
 
     /**

@@ -223,6 +223,25 @@ describe('Synchronizations (Integration Tests)', () => {
         assert.strictEqual(mockDbStore.projects[0]['schema:name'], 'test/repo', 'The new project should be in the mock DB');
     });
 
+    it('[INTEGRATION] Creating a new project should auto-select it', async () => {
+        let renderProjectSelectorCalled = false;
+        uiConcept.actions.renderProjectSelector = () => {
+            renderProjectSelectorCalled = true;
+        };
+
+        // Arrange
+        const projectDetails = { gitProvider: 'local', name: 'Auto-Selected Project' };
+
+        // Act
+        uiConcept.notify('ui:connectProjectClicked', projectDetails);
+        flushMockRequests(true); // addProject
+        flushMockRequests(true); // addProject (update with @id)
+
+        // Assert
+        assert.strictEqual(projectConcept.state.activeProjectId, 1, 'The newly created project should be set as active');
+        assert.isTrue(renderProjectSelectorCalled, 'The UI should be instructed to re-render the project selector');
+    });
+
     it('Storage -> Project -> Diagram: Initial load with empty DB should create a default project and diagram', async () => {
         // Arrange: Ensure the mock database is empty
         mockDbStore.projects = [];

@@ -5,6 +5,7 @@
  * for other concepts to trigger UI updates via the synchronization layer.
  */
 
+import { projectConcept } from './projectConcept.js';
 import { securityConcept } from './securityConcept.js';
 
 let mermaid = globalThis.mermaid;
@@ -48,6 +49,8 @@ function _cacheElements() {
         'connect-repo-path', 'connect-token', 'connect-password',
         'connect-password-confirm', 'connect-password-error',
         'connect-cancel-btn', 'connect-submit-btn', 'unlock-session-modal',
+        'connect-password-single', // New single password input
+        'connect-password-creation-group', // New group for create/confirm
         // New elements for local project creation
         'project-settings-btn', // New button
         'project-settings-modal', 'settings-project-name-display',
@@ -321,14 +324,33 @@ function _showConnectProjectModal() {
         elements['connect-project-modal'].style.display = 'flex';
         // Reset form fields
         elements['connect-provider'].value = 'github'; // Default to GitHub
-
-        // --- FIX: Hide password fields if a session password is already set ---
+        
+        // --- TDD FIX: Handle all password field visibility states ---
         const masterPasswordGroup = elements['connect-master-password-group'];
+        const singlePasswordField = elements['connect-password-single'];
+        const creationPasswordFieldGroup = elements['connect-password-creation-group'];
+
         const sessionPasswordExists = securityConcept.state.sessionPassword;
-        masterPasswordGroup.style.display = sessionPasswordExists ? 'none' : 'block';
+        const anyGitProjectsExist = projectConcept.state.projects.some(p => p.gitProvider !== 'local');
+
+        if (sessionPasswordExists) { // State 2: Subsequent (Unlocked)
+            masterPasswordGroup.style.display = 'none';
+        } else if (anyGitProjectsExist) { // State 1.5: Unlock for New
+            masterPasswordGroup.style.display = 'block';
+            singlePasswordField.style.display = 'block';
+            creationPasswordFieldGroup.style.display = 'none';
+        } else { // State 1: Initial Creation
+            masterPasswordGroup.style.display = 'block';
+            singlePasswordField.style.display = 'none';
+            creationPasswordFieldGroup.style.display = 'block';
+        }
 
         ['connect-repo-path', 'connect-token', 'connect-password', 'connect-password-confirm'].forEach(id => elements[id].value = '');
         elements['connect-submit-btn'].disabled = true;
+
+        // --- FIX: Explicitly update the view to match the default provider ---
+        // This ensures the modal resets correctly if it was previously on "Local".
+        _updateConnectModalVisibility();
     }
 }
 
@@ -379,6 +401,12 @@ function _showProjectSettingsModal({ project }) {
         // Conditionally show the "Connect to Git" section for local projects
         const connectToGitSection = elements['settings-connect-to-git-section'];
         connectToGitSection.style.display = (project.gitProvider === 'local') ? 'block' : 'none';
+        
+        // --- FIX: Hide password fields if a session password is already set ---
+        const settingsPasswordGroup = document.getElementById('settings-connect-master-password-group'); // Get this element directly
+        if (settingsPasswordGroup) {
+            settingsPasswordGroup.style.display = securityConcept.state.sessionPassword ? 'none' : 'block';
+        }
 
         elements['project-settings-modal'].style.display = 'flex';
     }
@@ -476,7 +504,10 @@ function _attachEventListeners() {
                 name: connectRepoPathInput.value.trim(), // Use repo path as default name for Git projects
                 repositoryPath: connectRepoPathInput.value.trim(),
                 token: connectTokenInput.value.trim(),
-                password: connectPasswordInput.value,
+                // Use the correct password field based on visibility
+                password: elements['connect-password-single'].style.display !== 'none'
+                    ? elements['connect-password-single'].value
+                    : elements['connect-password'].value,
             };
         }
 
@@ -521,6 +552,7 @@ function _attachEventListeners() {
     const connectPasswordInput = elements['connect-password'];
     const connectPasswordConfirmInput = elements['connect-password-confirm'];
     const connectPasswordError = elements['connect-password-error'];
+    const connectPasswordSingle = elements['connect-password-single'];
     const connectSubmitBtn = elements['connect-submit-btn'];
 
     const updateConnectModalVisibility = () => {
@@ -541,19 +573,26 @@ function _attachEventListeners() {
             allFilled = connectLocalProjectNameInput.value.trim() !== '';
         } else {
             const sessionPasswordExists = securityConcept.state.sessionPassword;
-            const passwordFieldsRequired = !sessionPasswordExists;
+            const anyGitProjectsExist = projectConcept.state.projects.some(p => p.gitProvider !== 'local');
+
+            const singlePasswordRequired = !sessionPasswordExists && anyGitProjectsExist;
+            const creationPasswordsRequired = !sessionPasswordExists && !anyGitProjectsExist;
 
             allFilled = connectRepoPathInput.value.trim() !== '' && connectTokenInput.value.trim() !== '' &&
-                        (!passwordFieldsRequired || (connectPasswordInput.value && connectPasswordConfirmInput.value));
-            passwordsMatch = connectPasswordInput.value === connectPasswordConfirmInput.value;
-            connectPasswordError.style.display = (connectPasswordInput.value && connectPasswordConfirmInput.value && !passwordsMatch) ? 'block' : 'none';
+                        (!singlePasswordRequired || connectPasswordSingle.value) &&
+                        (!creationPasswordsRequired || (connectPasswordInput.value && connectPasswordConfirmInput.value));
+
+            if (creationPasswordsRequired) {
+                passwordsMatch = connectPasswordInput.value === connectPasswordConfirmInput.value;
+                connectPasswordError.style.display = (connectPasswordInput.value && connectPasswordConfirmInput.value && !passwordsMatch) ? 'block' : 'none';
+            }
         }
         connectSubmitBtn.disabled = !(allFilled && passwordsMatch);
     };
 
     connectProviderSelect?.addEventListener('change', updateConnectModalVisibility);
     connectLocalProjectNameInput?.addEventListener('input', _updateConnectButtonState);
-    [connectRepoPathInput, connectTokenInput, connectPasswordInput, connectPasswordConfirmInput].forEach(el => el?.addEventListener('input', _updateConnectButtonState));
+    [connectRepoPathInput, connectTokenInput, connectPasswordInput, connectPasswordConfirmInput, connectPasswordSingle].forEach(el => el?.addEventListener('input', _updateConnectButtonState));
 
     // Initial call to set correct visibility and button state
     updateConnectModalVisibility();
@@ -667,6 +706,16 @@ function _attachEventListeners() {
   });
 
   elements['settings-close-btn']?.addEventListener('click', _hideProjectSettingsModal);
+}
+
+/**
+ * A helper function to manage the visibility of sections within the Connect Project modal
+ * based on the selected provider.
+ */
+function _updateConnectModalVisibility() {
+    const isLocal = elements['connect-provider'].value === 'local';
+    elements['connect-local-project-name-group'].style.display = isLocal ? 'block' : 'none';
+    elements['connect-git-fields-group'].style.display = isLocal ? 'none' : 'block';
 }
 
 function _switchTab(tabName) {
