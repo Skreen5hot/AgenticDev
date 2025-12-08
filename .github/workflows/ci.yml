@@ -27,68 +27,36 @@ jobs:
 
 ---
 
-  # 🎯 JOB 1: LOGIC TEST (Always Runs, Logs the "Environment")
-  deploy-logic-test:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    steps:
-      - name: Determine Deployment Target
-        id: set_target
-        run: |
-          # Default to 'Preview/Feature Branch'
-          DEPLOY_TARGET="Preview/Feature Branch"
-          PAGES_BASE_URL=""
-          
-          # Check for 'main' branch
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            DEPLOY_TARGET="PRODUCTION (main branch)"
-            PAGES_BASE_URL="/"
-          
-          # Check for 'dev' branch
-          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            DEPLOY_TARGET="DEV ENVIRONMENT (dev branch)"
-            PAGES_BASE_URL="/dev/"
-          fi
-          
-          echo "DEPLOY_TARGET=$DEPLOY_TARGET" >> $GITHUB_OUTPUT
-          echo "PAGES_BASE_URL=$PAGES_BASE_URL" >> $GITHUB_OUTPUT
-
-      - name: Log Determined Target
-        run: |
-          echo "--- LOGIC TEST SUCCESSFUL ---"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Deployment Target Determined: ${{ steps.set_target.outputs.DEPLOY_TARGET }}"
-          echo "Base URL to Use: ${{ steps.set_target.outputs.PAGES_BASE_URL }}"
-
----
-
-  # 🎯 JOB 2: DEPLOYMENT (Always Runs, Uses Logic from Job 1)
   deploy:
-    # Always runs after logic test, regardless of branch
-    needs: [build-and-test, deploy-logic-test]
+    # 🎯 FIX: REMOVED IF CONDITION - This job will NOW ALWAYS RUN.
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
 
-    # We must use a unique environment name here for non-main branches, 
-    # but we will default to github-pages.
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      # --- Get Variables from Logic Job ---
-      - name: Get Deployment Variables
-        id: vars
-        uses: actions/github-script@v6
-        with:
-          script: |
-            // This pulls the outputs from the logic test job
-            const logicOutput = context.payload.workflow_run.jobs.find(job => job.name === 'deploy-logic-test').steps.find(step => step.name === 'Determine Deployment Target').outputs;
-            core.setOutput('base_url', logicOutput.PAGES_BASE_URL);
+      # --- Conditional Test Step (The key for debugging) ---
+      - name: Conditional Branch Log (MAIN)
+        # This step only runs if the branch is exactly 'main'
+        if: github.ref == 'refs/heads/main'
+        run: echo "--- LOGIC SUCCESS: Detected PRODUCTION branch (MAIN) ---"
 
-      # --- Deployment Steps ---
+      - name: Conditional Branch Log (DEV)
+        # This step only runs if the branch is exactly 'dev'
+        if: github.ref == 'refs/heads/dev'
+        run: echo "--- LOGIC SUCCESS: Detected DEV branch (/dev) ---"
+        
+      - name: Conditional Branch Log (OTHER)
+        # This step runs if the branch is neither 'main' nor 'dev'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev'
+        run: echo "--- LOGIC SUCCESS: Detected FEATURE/OTHER branch (${{ github.ref_name }}) ---"
+      # ---------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -101,14 +69,10 @@ jobs:
         run: npm install
 
       - name: Build project
-        run: npm run build
+        run: npm run build 
 
-      # 1. CONFIGURE PAGES WITH BASE PATH (Uses the determined variable)
-      - name: Setup Pages with Base Path
-        uses: actions/configure-pages@v5
-        with:
-          # Use the determined variable to set the base path
-          base_url: ${{ steps.vars.outputs.base_url }}
+      - name: Setup Pages
+        uses: actions/configure-pages@v5 
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
