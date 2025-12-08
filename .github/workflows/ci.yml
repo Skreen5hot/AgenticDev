@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # Updated Version
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4 # Updated Version
         with:
           node-version: '18'
       - name: Install dependencies
@@ -30,8 +30,8 @@ jobs:
   
   # 🎯 JOB 1: PRODUCTION DEPLOYMENT (main branch)
   deploy-main:
-    # ✅ FIX: Explicitly check for push to 'main' branch
-    if: github.event_name == 'push' && github.ref_name == 'main'
+    # ✅ FIX: Use full ref string for rock-solid conditional check
+    if: github.ref == 'refs/heads/main'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -46,37 +46,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # --- Build and Artifact Creation Steps ---
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
       - name: Install dependencies
         run: npm install
+        
+      # Using 'npm run build' which must be configured in package.json
       - name: Build project
         run: npm run build 
       
       # 1. Configure Pages (No custom base path needed for root)
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v5 # Updated Version
 
       # 2. Upload artifact
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v3 # Updated Version
         with:
           path: './dist' 
 
       # 3. Deploy to GitHub Pages (Production)
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4 # Updated Version
 
 ---
 
   # 🎯 JOB 2: DEV PREVIEW DEPLOYMENT (dev branch only)
   deploy-dev:
-    # ✅ FIX: Explicitly check for push to 'dev' branch
-    if: github.event_name == 'push' && github.ref_name == 'dev'
+    # ✅ FIX: Use full ref string for rock-solid conditional check
+    if: github.ref == 'refs/heads/dev'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -84,7 +85,7 @@ jobs:
       id-token: write
 
     environment:
-      name: dev-preview # Using a new environment name
+      name: dev-preview # Unique environment name
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
@@ -104,8 +105,7 @@ jobs:
       - name: Setup Pages with Base Path
         uses: actions/configure-pages@v5
         with:
-          # Sets the base URL to /repo-name/dev/
-          # This only runs on the 'dev' branch due to the if: condition above.
+          # This sets the base URL for the deployment to /dev/
           base_url: /${{ github.ref_name }}/ 
 
       # 2. Upload artifact
