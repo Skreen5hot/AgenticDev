@@ -1,22 +1,21 @@
 # .github/workflows/ci.yml
 
-name: CI, Security & Deploy
+name: CI, Security & Preview Deploy
 
 on:
   push:
-    branches: [ "**" ] 
+    branches: [ "**" ] # Run on every push to every branch
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main" ] # Also run on pull requests to main
 
 jobs:
-  # The build-and-test job remains the same for all branches
   build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4 # Updated Version
+        uses: actions/checkout@v4
       - name: Set up Node.js
-        uses: actions/setup-node@v4 # Updated Version
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
       - name: Install dependencies
@@ -27,11 +26,11 @@ jobs:
         run: npm run security-check
 
 ---
-  
-  # 🎯 JOB 1: PRODUCTION DEPLOYMENT (main branch)
-  deploy-main:
-    # ✅ FIX: Use full ref string for rock-solid conditional check
-    if: github.ref == 'refs/heads/main'
+
+  deploy:
+    # ⏪ REVERTED IF CONDITION: Back to the original simple check.
+    # This should make the job visible again.
+    if: github.ref != 'refs/heads/main'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -39,82 +38,32 @@ jobs:
       id-token: write
 
     environment:
-      name: github-pages # Production environment
+      name: github-pages # Back to the original environment name
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+
       - name: Install dependencies
         run: npm install
-        
-      # Using 'npm run build' which must be configured in package.json
-      - name: Build project
-        run: npm run build 
-      
-      # 1. Configure Pages (No custom base path needed for root)
-      - name: Setup Pages
-        uses: actions/configure-pages@v5 # Updated Version
 
-      # 2. Upload artifact
+      - name: Build project
+        run: npm run build # Requires working 'build' script in package.json
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5 # Retained latest version
+
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3 # Updated Version
+        uses: actions/upload-pages-artifact@v3 # Retained latest version
         with:
           path: './dist' 
 
-      # 3. Deploy to GitHub Pages (Production)
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4 # Updated Version
-
----
-
-  # 🎯 JOB 2: DEV PREVIEW DEPLOYMENT (dev branch only)
-  deploy-dev:
-    # ✅ FIX: Use full ref string for rock-solid conditional check
-    if: github.ref == 'refs/heads/dev'
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-
-    environment:
-      name: dev-preview # Unique environment name
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      - name: Install dependencies
-        run: npm install
-      - name: Build project
-        run: npm run build 
-      
-      # 1. CONFIGURE PAGES WITH BASE PATH (KEY FIX)
-      - name: Setup Pages with Base Path
-        uses: actions/configure-pages@v5
-        with:
-          # This sets the base URL for the deployment to /dev/
-          base_url: /${{ github.ref_name }}/ 
-
-      # 2. Upload artifact
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './dist'
-
-      # 3. Deploy to GitHub Pages (Preview)
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4 # Retained latest version
