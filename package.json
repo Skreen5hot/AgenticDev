@@ -8,7 +8,7 @@
     "test": "node run-tests.js",
     "security-check": "npm audit --audit-level=high",
     "prepare": "husky install",
-    "build": "mkdir -p dist && cp -r * dist/"
+"build": "mkdir -p dist && cp -r index.html styles src dist/"
   },
   "keywords": [],
   "author": "",
