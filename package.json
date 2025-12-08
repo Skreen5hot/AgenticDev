@@ -7,7 +7,7 @@
   "scripts": {
     "test": "node run-tests.js",
     "security-check": "npm audit --audit-level=high",
-    "prepare": "husky install"
+    "prepare": "husky install",
     "build": "mkdir -p dist && cp -r * dist/"
   },
   "keywords": [],
