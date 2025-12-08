@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4 # UPDATED
+        uses: actions/checkout@v4
       - name: Set up Node.js
-        uses: actions/setup-node@v4 # UPDATED
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
       - name: Install dependencies
@@ -30,8 +30,8 @@ jobs:
   
   # 🎯 JOB 1: PRODUCTION DEPLOYMENT (main branch)
   deploy-main:
-    # This job only runs for the 'main' branch
-    if: github.ref_name == 'main'
+    # ✅ FIX: Explicitly check for push to 'main' branch
+    if: github.event_name == 'push' && github.ref_name == 'main'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -45,16 +45,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      # Standard build steps omitted for brevity (they would be here if not using artifacts)
-
-      # --- Steps 1 to 4: Build and Artifact Creation ---
-      # NOTE: These steps need to be repeated for the main branch if you are using
-      # the artifact method. I am assuming you ONLY need to deploy the artifact 
-      # created by the build-and-test job. If you need the full build steps, 
-      # they must be added here.
       
-      # For simplicity, we assume the build artifact is passed or rebuilt here. 
-      # Using your previous steps:
+      # --- Build and Artifact Creation Steps ---
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -81,10 +73,10 @@ jobs:
 
 ---
 
-  # 🎯 JOB 2: DEV PREVIEW DEPLOYMENT (dev and all other branches)
+  # 🎯 JOB 2: DEV PREVIEW DEPLOYMENT (dev branch only)
   deploy-dev:
-    # Only run for branches that are NOT main
-    if: github.ref_name != 'main'
+    # ✅ FIX: Explicitly check for push to 'dev' branch
+    if: github.event_name == 'push' && github.ref_name == 'dev'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -113,7 +105,7 @@ jobs:
         uses: actions/configure-pages@v5
         with:
           # Sets the base URL to /repo-name/dev/
-          # We use github.ref_name which is 'dev' for the dev branch
+          # This only runs on the 'dev' branch due to the if: condition above.
           base_url: /${{ github.ref_name }}/ 
 
       # 2. Upload artifact
