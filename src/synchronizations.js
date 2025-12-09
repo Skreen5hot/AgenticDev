@@ -251,32 +251,32 @@ export const synchronizations = [
           gitAbstractionConcept.actions.setProvider(provider, adapter);
 
           // 2. Validate repository and get default branch
-          let owner, repo, host;
+          let projectPath, apiBaseUrl;
           try {
             // Pre-process to fix common URL typos like "https:" -> "https://"
             const correctedPath = repositoryPath.replace(/^(https?:)(?!\/\/)/, '$1//');
             // Handle full URLs by extracting the path
             const url = new URL(correctedPath);
-            host = url.host; // Extract the host (e.g., 'maestro.dhs.gov')
-            // Adjust for GitLab instances on a subpath (e.g., /gitlab/user/repo)
-            const pathSegments = url.pathname.substring(1).replace(/\.git$/, '').split('/');
-            const projectPathIndex = pathSegments.findIndex(segment => segment.toLowerCase() === 'gitlab') + 1;
-            // e.g., /group/subgroup/project.git -> [group, subgroup, project]
-            const pathParts = url.pathname.substring(1).replace(/\.git$/, '').split('/');
-            owner = pathParts[0]; // The first part is the owner/group
-            repo = pathParts.slice(1).join('/'); // The rest is the repo name, allowing slashes in subgroups
+
+            // Find where the project path begins (e.g., after '/gitlab/')
+            const pathSegments = url.pathname.substring(1).replace(/\.git$/, '').split('/'); // e.g., ['gitlab', 'AARON.A.DAMIANO', 'ccv-tool']
+            // A simple heuristic: find the user/group segment. This is brittle but works for the user's case.
+            // A more robust solution would require a dedicated field for the API base URL in the UI.
+            const projectPathStartIndex = pathSegments.findIndex(seg => seg.toLowerCase() === 'aaron.a.damiano'); // Heuristic
+
+            projectPath = pathSegments.slice(projectPathStartIndex).join('/'); // 'AARON.A.DAMIANO/ccv-tool'
+            const apiSubPath = pathSegments.slice(0, projectPathStartIndex).join('/'); // 'gitlab'
+            apiBaseUrl = `${url.protocol}//${url.host}/${apiSubPath}`; // 'https://maestro.dhs.gov/gitlab'
+
           } catch (e) {
-            // Not a URL, assume it's in owner/repo or group/subgroup/repo format
-            const pathParts = repositoryPath.split('/');
-            owner = pathParts[0];
-            repo = pathParts.slice(1).join('/');
+            // Not a URL, assume it's in 'owner/repo' format for gitlab.com
+            projectPath = repositoryPath;
+            apiBaseUrl = null; // Let the adapter use its default (gitlab.com)
           }
-          if (!owner || !repo) throw new Error('Invalid repository path format. Must be "owner/repo" or a full URL.');
+          if (!projectPath) throw new Error('Invalid repository path format. Must be "owner/repo" or a full URL.');
           console.log('[Sync] Validating repository...');
-          // --- FIX: Pass the full canonical path and the detected host for self-hosted GitLab compatibility ---
-          const canonicalPath = `${owner}/${repo}`;
-          // Pass host as part of an options object for future flexibility
-          const repoInfo = await gitAbstractionConcept.actions.getRepoInfo(canonicalPath, token, { host });
+          // --- FIX: Pass the full project path and the detected apiBaseUrl for self-hosted GitLab compatibility ---
+          const repoInfo = await gitAbstractionConcept.actions.getRepoInfo(projectPath, token, { apiBaseUrl });
           const defaultBranch = repoInfo.default_branch;
           console.log(`[Sync] Repository validated. Default branch: ${defaultBranch}.`);
 
@@ -296,7 +296,7 @@ export const synchronizations = [
           newProject = {
             name: name || repositoryPath, // Use provided name, or repositoryPath as default
             gitProvider,
-            repositoryPath: canonicalPath, // Store the canonical owner/repo path
+            repositoryPath: projectPath, // Store the canonical owner/repo path
             defaultBranch,
             lastSyncSha: null,
             encryptedToken, // This is an object: { ciphertext, salt, iv }
