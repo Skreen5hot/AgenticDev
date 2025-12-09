@@ -488,6 +488,18 @@ function _attachEventListeners() {
 
     elements['connect-cancel-btn']?.addEventListener('click', _hideConnectProjectModal);
 
+    // --- Declare Connect Project Modal elements before use ---
+    const connectProviderSelect = elements['connect-provider'];
+    const connectLocalProjectNameInput = elements['connect-local-project-name'];
+    const connectLocalProjectNameGroup = elements['connect-local-project-name-group'];
+    const connectGitFieldsGroup = elements['connect-git-fields-group'];
+    const connectMasterPasswordGroup = elements['connect-master-password-group'];
+    const connectRepoPathInput = elements['connect-repo-path'];
+    const connectTokenInput = elements['connect-token'];
+    const connectPasswordInput = elements['connect-password'];
+    const connectPasswordConfirmInput = elements['connect-password-confirm'];
+    const connectPasswordError = elements['connect-password-error'];
+
     elements['connect-submit-btn']?.addEventListener('click', (e) => {
         console.log('[UI] "Encrypt & Connect" button clicked.');
         const gitProvider = connectProviderSelect.value;
@@ -541,17 +553,7 @@ function _attachEventListeners() {
     // Fullscreen toggle
     elements['fullscreen-btn']?.addEventListener('click', () => _toggleFullscreen());
 
-    // --- Connect Project Modal Listeners ---
-    const connectProviderSelect = elements['connect-provider'];
-    const connectLocalProjectNameInput = elements['connect-local-project-name'];
-    const connectLocalProjectNameGroup = elements['connect-local-project-name-group'];
-    const connectGitFieldsGroup = elements['connect-git-fields-group'];
-    const connectMasterPasswordGroup = elements['connect-master-password-group'];
-    const connectRepoPathInput = elements['connect-repo-path'];
-    const connectTokenInput = elements['connect-token'];
-    const connectPasswordInput = elements['connect-password'];
-    const connectPasswordConfirmInput = elements['connect-password-confirm'];
-    const connectPasswordError = elements['connect-password-error'];
+    // --- Connect Project Modal Listeners (elements already declared above) ---
     const connectPasswordSingle = elements['connect-password-single'];
     const connectSubmitBtn = elements['connect-submit-btn'];
 

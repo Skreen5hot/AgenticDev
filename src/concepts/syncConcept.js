@@ -241,7 +241,16 @@ async function pushChanges(project, token, owner, repo, diagramsPath) {
         let response;
         switch (action) {
           case 'create':
-            break;ram(item.diagramId);
+            response = await gitAbstractionConcept.actions.putContents(owner, repo, filePath, payload.content, commitMessage, null, token);
+            const createdDiagram = await storageConcept.actions.getDiagram(item.diagramId);
+            if (createdDiagram) {
+              createdDiagram.lastModifiedRemoteSha = response.content.sha;
+              await storageConcept.actions.updateDiagram(createdDiagram);
+            }
+            break;
+          case 'update':
+            response = await gitAbstractionConcept.actions.putContents(owner, repo, filePath, payload.content, commitMessage, payload.sha, token);
+            const updatedDiagram = await storageConcept.actions.getDiagram(item.diagramId);
             if (updatedDiagram) {
               updatedDiagram.lastModifiedRemoteSha = response.content.sha;
               await storageConcept.actions.updateDiagram(updatedDiagram);

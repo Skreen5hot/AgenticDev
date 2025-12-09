@@ -669,6 +669,12 @@ export const synchronizations = [
         console.log('[Sync] Bulk upload processing finished. Triggering a single sync.');
         syncConcept.actions.triggerSync();
         uiConcept.actions.showNotification({ message: `Successfully imported ${diagrams.length} diagram(s).`, type: 'success' });
+      }).catch(error => {
+        console.error('[Sync] Error during bulk upload:', error);
+        uiConcept.actions.showNotification({
+          message: `Error importing diagrams: ${error.message}`,
+          type: 'error'
+        });
       })
     },
   },
