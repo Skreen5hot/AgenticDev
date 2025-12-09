@@ -4,8 +4,6 @@
  * This module handles all direct communication with GitLab.
  */
 
-const GITLAB_API_BASE = 'https://gitlab.com/api/v4';
-
 /**
  * A robust, Unicode-safe Base64 encoder.
  * The native btoa() function fails on strings containing characters outside of the Latin1 range.
@@ -24,19 +22,21 @@ const _sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * A helper function to handle common fetch logic for the GitLab API.
- * @param {string} url - The full URL to fetch.
+ * @param {string} path - The API path relative to /api/v4 (e.g., 'projects/group%2Fproject').
  * @param {string} token - The user's GitLab personal access token.
- * @param {RequestInit} options - Additional fetch options.
+ * @param {object} [options={}] - Additional options for the fetch call.
+ * @param {string} [options.method='GET'] - The HTTP method.
+ * @param {object} [options.body=null] - The request body for POST/PUT requests.
+ * @param {string} [options.apiBaseUrl=null] - The base URL for the API (for self-hosted instances, e.g., 'https://maestro.dhs.gov/gitlab').
  * @returns {Promise<any>} The JSON response.
  */
-async function _gitlabFetch(url, token, options = {}, retries = 3, backoff = 1000) {
-  for (let i = 0; i < retries; i++) {
-    const headers = {
-      'PRIVATE-TOKEN': token,
-      ...options.headers,
-    };
+async function _gitlabFetch(path, token, options = {}, retries = 3, backoff = 1000) {
+  const { method = 'GET', body = null, apiBaseUrl = null } = options;
+  const baseUrl = apiBaseUrl || 'https://gitlab.com'; // Default to gitlab.com if no custom base URL is provided
+  const apiUrl = `${baseUrl}/api/v4/${path}`;
 
-    const response = await fetch(url, { ...options, headers });
+  for (let i = 0; i < retries; i++) {
+    const response = await fetch(apiUrl, { method, headers: { 'PRIVATE-TOKEN': token, 'Content-Type': 'application/json', ...options.headers }, body: body ? JSON.stringify(body) : null });
 
     if (response.ok) {
       if (response.status === 204) {
@@ -45,7 +45,7 @@ async function _gitlabFetch(url, token, options = {}, retries = 3, backoff = 100
       return response.json();
     }
 
-    // GitLab primarily uses 429 for rate limiting
+    // GitLab primarily uses 429 for rate limiting, but also 5xx for server errors
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
       let waitTime = backoff * Math.pow(2, i); // Exponential backoff
@@ -57,11 +57,16 @@ async function _gitlabFetch(url, token, options = {}, retries = 3, backoff = 100
         }
       }
       
-      console.warn(`[GitLab Adapter] Rate limit hit. Retrying in ${waitTime / 1000}s... (${i + 1}/${retries})`);
+      console.warn(`[GitLab Adapter] API request failed with status ${response.status}. Retrying in ${waitTime / 1000}s... (${i + 1}/${retries})`);
       await _sleep(waitTime);
       continue; // Go to next iteration of the loop
     }
 
+    // For 401 Unauthorized, 403 Forbidden, 404 Not Found, etc., fail immediately
+    if (response.status >= 400 && response.status < 500) {
+      const errorBody = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(`[GitLab API Error] ${response.status}: ${errorBody.message || errorBody.error}`);
+    }
     // For other non-ok responses, fail immediately
     const errorBody = await response.json().catch(() => ({ message: response.statusText }));
     throw new Error(`[GitLab API Error] ${response.status}: ${errorBody.message || errorBody.error}`);
@@ -77,15 +82,14 @@ async function _gitlabFetch(url, token, options = {}, retries = 3, backoff = 100
 export const gitlabAdapter = {
   /**
    * Gets repository information, primarily to find the default branch.
-   * @param {string} owner - The repository owner/group.
-   * @param {string} repo - The repository name.
+   * @param {string} projectPath - The full project path (e.g., 'group/subgroup/project').
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for self-hosted instances.
    * @returns {Promise<{default_branch: string}>}
    */
-  getRepoInfo(owner, repo, token) {
-    const projectId = encodeURIComponent(`${owner}/${repo}`);
-    const url = `${GITLAB_API_BASE}/projects/${projectId}`;
-    return _gitlabFetch(url, token);
+  getRepoInfo(projectPath, token, options = {}) {
+    const encodedProjectPath = encodeURIComponent(projectPath);
+    return _gitlabFetch(`projects/${encodedProjectPath}`, token, options);
   },
 
   /**
@@ -96,12 +100,11 @@ export const gitlabAdapter = {
    * @param {string} token - The user's PAT.
    * @returns {Promise<any[]>} An array of file/directory objects.
    */
-  async listContents(owner, repo, path, token) {
-    const projectId = encodeURIComponent(`${owner}/${repo}`);
+  async listContents(projectPath, token, path, options = {}) {
+    const encodedProjectPath = encodeURIComponent(projectPath);
     // Note: GitLab's `tree` endpoint doesn't return SHAs for files directly.
     // It returns a `blob_id`. We will map this to `sha` for compatibility.
-    const url = `${GITLAB_API_BASE}/projects/${projectId}/repository/tree?path=${path}`;
-    return _gitlabFetch(url, token);
+    return _gitlabFetch(`projects/${encodedProjectPath}/repository/tree?path=${path}`, token, options);
   },
 
   /**
@@ -112,14 +115,14 @@ export const gitlabAdapter = {
    * @param {string} token - The user's PAT.
    * @param {string} [ref] - An optional branch, tag, or SHA.
    * @returns {Promise<{content: string, sha: string}>} Decoded content and file SHA.
-   */
-  async getContents(owner, repo, path, token, ref) {
-    const projectId = encodeURIComponent(`${owner}/${repo}`);
+   */ // Note: The original `getContents` signature had `owner, repo, path, token, ref`. The `options` object is now the 5th parameter.
+  async getContents(projectPath, token, path, ref, options = {}) {
+    const encodedProjectPath = encodeURIComponent(projectPath);
     const filePath = encodeURIComponent(path);
-    const refToUse = ref || (await this.getRepoInfo(owner, repo, token)).default_branch;
-    const url = `${GITLAB_API_BASE}/projects/${projectId}/repository/files/${filePath}?ref=${refToUse}`;
+    // Pass options to getRepoInfo as well, so it uses the correct base URL
+    const refToUse = ref || (await this.getRepoInfo(projectPath, token, options)).default_branch;
     
-    const response = await _gitlabFetch(url, token);
+    const response = await _gitlabFetch(`projects/${encodedProjectPath}/repository/files/${filePath}?ref=${refToUse}`, token, options);
     // GitLab API returns content base64 encoded. `blob_id` is the SHA.
     return {
       content: atob(response.content),
@@ -135,12 +138,12 @@ export const gitlabAdapter = {
    * @param {string} token - The user's PAT.
    * @returns {Promise<string | null>} The SHA of the tree, or null if not found.
    */
-  async getTreeSha(owner, repo, path, token) {
+  async getTreeSha(projectPath, token, path, options = {}) {
     // Use the same robust logic as the GitHub adapter: get the parent's contents
     // and find the target directory's SHA within that list.
     const parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-    try {
-      const parentContents = await this.listContents(owner, repo, parentPath, token);
+    try { // Pass options to listContents
+      const parentContents = await this.listContents(projectPath, token, parentPath, options);
       // GitLab uses 'tree' for directories.
       const pathEntry = parentContents.find(entry => entry.path === path && entry.type === 'tree');
       return pathEntry ? pathEntry.id : null; // GitLab uses 'id' for the SHA
@@ -161,11 +164,11 @@ export const gitlabAdapter = {
    * @param {string} token - The user's PAT.
    * @returns {Promise<any>}
    */
-  async putContents(owner, repo, path, content, message, sha, token) {
-    const projectId = encodeURIComponent(`${owner}/${repo}`);
+  async putContents(projectPath, token, path, content, message, sha, options = {}) {
+    const encodedProjectPath = encodeURIComponent(projectPath);
     const filePath = encodeURIComponent(path);
-    const { default_branch } = await this.getRepoInfo(owner, repo, token);
-
+    // Pass options to getRepoInfo as well, so it uses the correct base URL
+    const { default_branch } = await this.getRepoInfo(projectPath, token, options);
     const body = {
       branch: default_branch,
       content: unicodeBtoa(content),
@@ -174,11 +177,10 @@ export const gitlabAdapter = {
 
     // GitLab uses POST for create and PUT for update.
     const method = sha ? 'PUT' : 'POST';
-    const url = `${GITLAB_API_BASE}/projects/${projectId}/repository/files/${filePath}`;
 
-    return _gitlabFetch(url, token, {
+    return _gitlabFetch(`projects/${encodedProjectPath}/repository/files/${filePath}`, token, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      ...options, // Merge any additional options
       body: JSON.stringify(body),
     });
   },
@@ -193,17 +195,15 @@ export const gitlabAdapter = {
    * @param {string} token - The user's PAT.
    * @returns {Promise<any>}
    */
-  async deleteContents(owner, repo, path, message, sha, token) {
-    const projectId = encodeURIComponent(`${owner}/${repo}`);
+  async deleteContents(projectPath, token, path, message, sha, options = {}) {
+    const encodedProjectPath = encodeURIComponent(projectPath);
     const filePath = encodeURIComponent(path);
-    const { default_branch } = await this.getRepoInfo(owner, repo, token);
-
+    // Pass options to getRepoInfo as well, so it uses the correct base URL
+    const { default_branch } = await this.getRepoInfo(projectPath, token, options);
     const body = { branch: default_branch, commit_message: message };
-    const url = `${GITLAB_API_BASE}/projects/${projectId}/repository/files/${filePath}`;
-
-    return _gitlabFetch(url, token, {
+    return _gitlabFetch(`projects/${encodedProjectPath}/repository/files/${filePath}`, token, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      ...options, // Merge any additional options
       body: JSON.stringify(body),
     });
   },
@@ -216,10 +216,10 @@ export const gitlabAdapter = {
    * @param {string} token - The user's PAT.
    * @returns {Promise<{sha: string}>} An object containing the commit SHA.
    */
-  async getLatestCommit(owner, repo, branch, token) {
-    const projectId = encodeURIComponent(`${owner}/${repo}`);
-    const url = `${GITLAB_API_BASE}/projects/${projectId}/repository/branches/${branch}`;
-    const branchInfo = await _gitlabFetch(url, token);
+  async getLatestCommit(projectPath, token, branch, options = {}) {
+    const encodedProjectPath = encodeURIComponent(projectPath);
+    // Pass options to _gitlabFetch
+    const branchInfo = await _gitlabFetch(`projects/${encodedProjectPath}/repository/branches/${branch}`, token, options);
     return { sha: branchInfo.commit.id }; // GitLab uses 'id' for the commit SHA in this response
   },
 };
