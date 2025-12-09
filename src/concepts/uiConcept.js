@@ -3,6 +3,11 @@
  * @description Manages all direct DOM manipulations and UI state.
  * It listens to DOM events and notifies the system. It also exposes actions
  * for other concepts to trigger UI updates via the synchronization layer.
+ *
+ * ARCHITECTURAL NOTE: This concept imports projectConcept and securityConcept for
+ * READ-ONLY state access to make UI decisions (e.g., showing/hiding elements based
+ * on session state). This is acceptable for presentation logic, but the concept never
+ * calls actions on other concepts - all mutations flow through synchronizations.js.
  */
 
 import { projectConcept } from './projectConcept.js';

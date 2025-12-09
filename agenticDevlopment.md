@@ -160,21 +160,52 @@ test('taskAdded triggers progress update', () => {
 
 ---
 
+## 🔧 Orchestrator Services (Exception to the Rule)
+
+While pure domain **Concepts** should remain independent and communicate only through events, complex applications may require **Orchestrator Services** that coordinate multiple concepts to perform infrastructure tasks.
+
+### When to Use Orchestrator Services
+
+Create an orchestrator service (not a concept) when:
+- The logic requires coordinating 3+ concepts simultaneously
+- The operation is infrastructure-level (sync, backup, migration) not domain-level
+- Breaking it into event chains would create excessive complexity
+- The orchestration algorithm needs to be cohesive and testable as a unit
+
+### Example: Sync Service
+
+The `syncService.js` orchestrates bi-directional sync between local storage and remote Git:
+- Imports: `securityConcept`, `projectConcept`, `storageConcept`, `gitAbstractionConcept`
+- Coordinates: token decryption → remote fetch → 3-way merge → local update
+- This is acceptable because sync is infrastructure, not a domain concept
+
+### Guidelines for Orchestrator Services
+
+1. **Name them as services** - Use `*Service.js` not `*Concept.js` to signal the architectural exception
+2. **Document the exception** - Add a comment block explaining why direct imports are necessary
+3. **Keep them focused** - Each service should have ONE clear infrastructure responsibility
+4. **Emit events** - Services should still emit lifecycle events (`syncStarted`, `syncCompleted`)
+5. **Test thoroughly** - Mock dependencies explicitly since they're tightly coupled
+
+---
+
 ## ⚙️ Folder Structure
 
 ```
 /pwa
  ├── index.html
  ├── /concepts
- │    ├── taskManager.js
+ │    ├── taskManager.js        # Pure domain concepts
  │    ├── progressTracker.js
- │    └── storageSync.js
+ │    ├── storageSync.js
+ │    └── syncService.js         # Orchestrator service (exception)
  ├── synchronizations.js
  ├── /ui
  │    └── components.js
  ├── /tests
  │    ├── taskManager.test.js
  │    ├── progressTracker.test.js
+ │    ├── sync.service.test.js
  │    └── synchronizations.test.js
  ├── manifest.json
  └── service-worker.js

@@ -154,8 +154,8 @@ function getMockElement(id) {
     return mockElements[id] || { style: {}, addEventListener: () => {}, classList: { add: () => {}, remove: () => {} } };
 }
 function setupSyncTriggerSpy() {
-    const originalTrigger = syncConcept.actions.triggerSync;
-    syncConcept.actions.triggerSync = () => {
+    const originalTrigger = syncService.actions.triggerSync;
+    syncService.actions.triggerSync = () => {
         syncTriggered = true;
         originalTrigger();
     };

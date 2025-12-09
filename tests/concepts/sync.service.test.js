@@ -1,5 +1,5 @@
 import { describe, it, assert, beforeEach } from '../test-utils.js';
-import { syncConcept } from '../../src/concepts/syncConcept.js';
+import { syncService } from '../../src/concepts/syncService.js';
 import { projectConcept } from '../../src/concepts/projectConcept.js';
 import { securityConcept } from '../../src/concepts/securityConcept.js';
 import { storageConcept } from '../../src/concepts/storageConcept.js';
@@ -15,7 +15,7 @@ describe('Sync Concept', () => {
   
   beforeEach(() => {
     // Reset state
-    syncConcept.state.isSyncing = false;
+    syncService.state.isSyncing = false;
     projectConcept.state.activeProjectId = 1;
     projectConcept.state.projects = [project];
     securityConcept.state.decryptedToken = token;
@@ -63,7 +63,7 @@ describe('Sync Concept', () => {
         return Promise.resolve();
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(addDiagramCalled, 'storageConcept.addDiagram should have been called');
     });
@@ -79,7 +79,7 @@ describe('Sync Concept', () => {
         return Promise.resolve();
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(updateDiagramCalled, 'storageConcept.updateDiagram should have been called');
     });
@@ -94,7 +94,7 @@ describe('Sync Concept', () => {
         return Promise.resolve();
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(deleteDiagramCalled, 'storageConcept.deleteDiagram should have been called');
     });
@@ -112,7 +112,7 @@ describe('Sync Concept', () => {
         return Promise.resolve({ content: { sha: 'gitkeep-sha' } });
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(putContentsCalled, 'gitAbstractionConcept.putContents should have been called to create the directory');
     });
@@ -132,7 +132,7 @@ describe('Sync Concept', () => {
         return Promise.resolve({ content: { sha: 'new-sha' } });
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(putContentsCalled, 'gitAbstractionConcept.putContents should have been called');
     });
@@ -150,7 +150,7 @@ describe('Sync Concept', () => {
         return Promise.resolve({ content: { sha: 'new-sha' } });
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(putContentsCalled, 'gitAbstractionConcept.putContents should have been called');
     });
@@ -167,7 +167,7 @@ describe('Sync Concept', () => {
         return Promise.resolve();
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(deleteContentsCalled, 'gitAbstractionConcept.deleteContents should have been called');
     });
@@ -189,7 +189,7 @@ describe('Sync Concept', () => {
         return Promise.resolve({ content: { sha: 'new-sha' } });
       };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isTrue(deleteCalled, 'deleteContents should have been called for rename');
       assert.isTrue(createCalled, 'putContents should have been called for rename');
@@ -214,7 +214,7 @@ describe('Sync Concept', () => {
       // 5. Spy on updateDiagram to see what it gets called with.
       storageConcept.actions.updateDiagram = (diagram) => { updateDiagramCalledWith = diagram; return Promise.resolve(); };
 
-      await syncConcept.actions._performSync(project, token);
+      await syncService.actions._performSync(project, token);
 
       assert.isNotNull(updateDiagramCalledWith, 'storageConcept.updateDiagram should have been called');
       assert.strictEqual(updateDiagramCalledWith.content, 'remote changes', 'The diagram should be updated with the content from the remote');

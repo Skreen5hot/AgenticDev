@@ -1,8 +1,22 @@
 /**
- * @module syncConcept
- * @description Orchestrates the bi-directional synchronization between the local
- * IndexedDB and the remote Git repository. This is the "Synchronization Core Agent".
- * It manages polling for remote changes and processing the local change queue.
+ * @module syncService
+ * @description ORCHESTRATOR SERVICE - Coordinates bi-directional synchronization
+ * between local IndexedDB and remote Git repositories.
+ *
+ * ARCHITECTURAL NOTE: This is an infrastructure/orchestrator service, not a pure
+ * domain "Concept" in the MIT CSAIL sense. It legitimately imports and coordinates
+ * multiple concepts (security, project, storage, git) to perform complex sync operations.
+ *
+ * Pure domain concepts should remain independent and event-driven, but orchestrator
+ * services like this one require direct access to multiple concepts to perform their
+ * coordination responsibilities.
+ *
+ * Responsibilities:
+ * - Manages polling intervals for remote changes
+ * - Orchestrates pull operations (remote → local)
+ * - Orchestrates push operations (local → remote)
+ * - Handles 3-way merge conflict resolution
+ * - Maintains sync state and emits sync lifecycle events
  */
 
 import { securityConcept } from './securityConcept.js';
@@ -26,7 +40,7 @@ function notify(event, payload) {
 
 const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
-export const syncConcept = {
+export const syncService = {
   state: {
     isSyncing: false,
     syncIntervalId: null,
@@ -38,15 +52,15 @@ export const syncConcept = {
      * Starts a periodic poll to check for remote changes.
      */
     startPolling() {
-      if (syncConcept.state.syncIntervalId) {
-        console.log('[SyncConcept] Polling is already active.');
+      if (syncService.state.syncIntervalId) {
+        console.log('[SyncService] Polling is already active.');
         return;
       }
-      console.log(`[SyncConcept] Starting polling every ${SYNC_INTERVAL / 1000 / 60} minutes.`);
+      console.log(`[SyncService] Starting polling every ${SYNC_INTERVAL / 1000 / 60} minutes.`);
       // Trigger an initial sync immediately, then start the interval.
-      syncConcept.actions.triggerSync();
-      syncConcept.state.syncIntervalId = setInterval(() => {
-        syncConcept.actions.triggerSync();
+      syncService.actions.triggerSync();
+      syncService.state.syncIntervalId = setInterval(() => {
+        syncService.actions.triggerSync();
       }, SYNC_INTERVAL);
     },
 
@@ -54,10 +68,10 @@ export const syncConcept = {
      * Stops the periodic polling.
      */
     stopPolling() {
-      if (syncConcept.state.syncIntervalId) {
-        clearInterval(syncConcept.state.syncIntervalId);
-        syncConcept.state.syncIntervalId = null;
-        console.log('[SyncConcept] Polling stopped.');
+      if (syncService.state.syncIntervalId) {
+        clearInterval(syncService.state.syncIntervalId);
+        syncService.state.syncIntervalId = null;
+        console.log('[SyncService] Polling stopped.');
       }
     },
 
@@ -65,8 +79,8 @@ export const syncConcept = {
      * Manually triggers a one-off synchronization cycle.
      */
     triggerSync() {
-      if (syncConcept.state.isSyncing) {
-        console.warn('[SyncConcept] Sync already in progress. Skipping this trigger.');
+      if (syncService.state.isSyncing) {
+        console.warn('[SyncService] Sync already in progress. Skipping this trigger.');
         return;
       }
       // We need the active project and token to perform a sync.
@@ -75,9 +89,9 @@ export const syncConcept = {
       const sessionPassword = securityConcept.state.sessionPassword;
 
       if (activeProject && (activeProject.gitProvider === 'local' || sessionPassword)) {
-        syncConcept.actions._performSync();
+        syncService.actions._performSync();
       } else {
-        console.log('[SyncConcept] Skipping sync: No active project or session is not unlocked.');
+        console.log('[SyncService] Skipping sync: No active project or session is not unlocked.');
       }
     },
 
@@ -88,9 +102,9 @@ export const syncConcept = {
      * @private
      */
     async _performSync() {
-      syncConcept.state.isSyncing = true;
+      syncService.state.isSyncing = true;
       notify('syncStarted');
-      console.log('[SyncConcept] Starting synchronization cycle...');
+      console.log('[SyncService] Starting synchronization cycle...');
 
       try {
         const project = projectConcept.state.projects.find(p => p.id === projectConcept.state.activeProjectId);
@@ -98,7 +112,7 @@ export const syncConcept = {
         // --- NEW: Guard against trying to sync local projects ---
         if (!project) throw new Error('Sync failed: No active project.');
         if (project.gitProvider === 'local') {
-          console.log('[SyncConcept] Skipping sync for local project.');
+          console.log('[SyncService] Skipping sync for local project.');
           return; // Exit early, nothing to sync.
         }
 
@@ -140,13 +154,13 @@ export const syncConcept = {
         notify('diagramsChanged', { projectId: project.id });
 
       } catch (error) {
-        console.error('[SyncConcept] Error during synchronization cycle:', error);
+        console.error('[SyncService] Error during synchronization cycle:', error);
         notify('syncError', { error });
       } finally {
-        syncConcept.state.isSyncing = false;
-        syncConcept.state.lastSyncTimestamp = new Date();
-        notify('syncCompleted', { timestamp: syncConcept.state.lastSyncTimestamp });
-        console.log('[SyncConcept] Synchronization cycle finished.');
+        syncService.state.isSyncing = false;
+        syncService.state.lastSyncTimestamp = new Date();
+        notify('syncCompleted', { timestamp: syncService.state.lastSyncTimestamp });
+        console.log('[SyncService] Synchronization cycle finished.');
       }
     },
   },
@@ -201,7 +215,11 @@ async function pullChanges(project, token, owner, repo, diagramsPath) {
         .then(({ content, sha }) => storageConcept.actions.addDiagram({
           projectId: project.id, title: remoteFile.name, content,
           lastModifiedRemoteSha: sha, createdAt: new Date(), updatedAt: new Date(),
-        }));
+        }))
+        .catch((error) => {
+          console.error(`[Pull] Failed to download "${remoteFile.name}":`, error);
+          // Don't throw - allow other files to continue syncing
+        });
       pullPromises.push(downloadPromise);
     } else if (localMatch.lastModifiedRemoteSha !== remoteFile.sha) { // File exists locally, check if remote has changed
       // This is the "Remote Wins" strategy. If the remote file has a different SHA,
@@ -209,7 +227,11 @@ async function pullChanges(project, token, owner, repo, diagramsPath) {
       // Pending local changes in the queue will be handled during the push phase.
       console.log(`[Pull] Conflict or update detected for "${remoteFile.name}". Remote version wins. Downloading...`);
       const updatePromise = gitAbstractionConcept.actions.getContents(owner, repo, remoteFile.path, token)
-        .then(({ content, sha }) => storageConcept.actions.updateDiagram({ ...localMatch, content, lastModifiedRemoteSha: sha, updatedAt: new Date() }));
+        .then(({ content, sha }) => storageConcept.actions.updateDiagram({ ...localMatch, content, lastModifiedRemoteSha: sha, updatedAt: new Date() }))
+        .catch((error) => {
+          console.error(`[Pull] Failed to update "${remoteFile.name}":`, error);
+          // Don't throw - allow other files to continue syncing
+        });
       pullPromises.push(updatePromise);
     } else {
       console.log(`[Pull] Local file "${remoteFile.name}" is already up-to-date. Skipping.`);
@@ -219,11 +241,17 @@ async function pullChanges(project, token, owner, repo, diagramsPath) {
   for (const localDiagram of localDiagrams) {
     if (!remoteFilesMap.has(localDiagram.title) && localDiagram.lastModifiedRemoteSha !== null) {
       console.log(`[Sync] Remote file deleted: ${localDiagram.title}. Deleting local...`);
-      pullPromises.push(storageConcept.actions.deleteDiagram(localDiagram.id));
+      const deletePromise = storageConcept.actions.deleteDiagram(localDiagram.id)
+        .catch((error) => {
+          console.error(`[Pull] Failed to delete "${localDiagram.title}":`, error);
+          // Don't throw - allow other operations to continue
+        });
+      pullPromises.push(deletePromise);
     }
   }
 
   await Promise.all(pullPromises);
+  console.log('[Pull] Pull phase completed successfully');
 }
 
 async function pushChanges(project, token, owner, repo, diagramsPath) {

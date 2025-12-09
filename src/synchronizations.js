@@ -12,7 +12,7 @@ import { gitAbstractionConcept } from './concepts/gitAbstractionConcept.js';
 import { githubAdapter } from './github.js';
 import { gitlabAdapter } from './gitlab.js';
 import { projectConcept } from './concepts/projectConcept.js';
-import { syncConcept } from './concepts/syncConcept.js';
+import { syncService } from './concepts/syncService.js';
 import { diagramConcept } from './concepts/diagramConcept.js';
 import { uiConcept } from './concepts/uiConcept.js';
 
@@ -144,7 +144,7 @@ export const synchronizations = [
         // And immediately select the new diagram to be active in the editor.
         diagramConcept.actions.loadDiagramContent({ diagramId: newId });
         if (!skipSyncTrigger) {
-          syncConcept.actions.triggerSync(); // Trigger sync after creating a diagram
+          syncService.actions.triggerSync(); // Trigger sync after creating a diagram
         }
         console.log(`[Sync] Diagram "${name}" created and added to sync queue.`);
       } catch (error) {
@@ -186,7 +186,7 @@ export const synchronizations = [
         }
 
         await storageConcept.actions.updateDiagram(diagramToSave);
-        syncConcept.actions.triggerSync(); // Trigger sync after saving a diagram
+        syncService.actions.triggerSync(); // Trigger sync after saving a diagram
         console.log(`[Sync] Diagram ${diagram.id} saved successfully to IndexedDB.`);
         // Optionally, we could emit a new event like 'diagramSavedSuccessfully'
         // for the UI to listen to, e.g., to show a "Saved!" notification.
@@ -315,7 +315,7 @@ export const synchronizations = [
         projectConcept.actions.setActiveProject(newProjectId);
 
         // --- FIX: Trigger an initial sync to pull diagrams from the new repo ---
-        syncConcept.actions.triggerSync();
+        syncService.actions.triggerSync();
 
         // 9. Close the modal and show a success notification
         uiConcept.actions.hideConnectProjectModal();
@@ -351,7 +351,7 @@ export const synchronizations = [
             attempts: 0,
             createdAt: new Date(),
           });
-          syncConcept.actions.triggerSync(); // Trigger sync after deleting a diagram
+          syncService.actions.triggerSync(); // Trigger sync after deleting a diagram
         } else if (diagramToDelete) {
           // --- FIX: Handle deletion of a local-only diagram that might be in the sync queue ---
           // If the diagram has no remote SHA, it was never synced. We must remove any pending
@@ -522,7 +522,7 @@ export const synchronizations = [
         // 3. Refresh the UI to show the new name.
         diagramConcept.actions.loadDiagramsForProject({ projectId: diagram.projectId });
         diagramConcept.actions.setActiveDiagram(diagram); // Update the active diagram state
-        syncConcept.actions.triggerSync(); // Trigger sync after renaming a diagram
+        syncService.actions.triggerSync(); // Trigger sync after renaming a diagram
       } catch (error) {
         console.error('[Sync] Failed to process diagram rename:', error);
         uiConcept.actions.showNotification({ message: `Error renaming diagram: ${error.message}`, type: 'error' });
@@ -577,7 +577,7 @@ export const synchronizations = [
 
         uiConcept.actions.hideUnlockSessionModal();
         // Trigger a sync, which will now succeed for any project.
-        syncConcept.actions.triggerSync();
+        syncService.actions.triggerSync();
       } catch (error) {
         // The decryptToken action already logs the error, so we just update the UI.
         const errorEl = document.getElementById('unlock-error');
@@ -667,7 +667,7 @@ export const synchronizations = [
       // Once all diagrams are processed, trigger a single sync.
       Promise.all(creationPromises).then(() => {
         console.log('[Sync] Bulk upload processing finished. Triggering a single sync.');
-        syncConcept.actions.triggerSync();
+        syncService.actions.triggerSync();
         uiConcept.actions.showNotification({ message: `Successfully imported ${diagrams.length} diagram(s).`, type: 'success' });
       }).catch(error => {
         console.error('[Sync] Error during bulk upload:', error);
@@ -797,7 +797,7 @@ export const synchronizations = [
         uiConcept.actions.showNotification({ message: 'Project connected to Git successfully!', type: 'success' });
 
         // --- FIX: Trigger a sync to push existing local diagrams to the new repo ---
-        syncConcept.actions.triggerSync();
+        syncService.actions.triggerSync();
 
       } catch (error) {
         console.error('[Sync] Failed to connect existing project to Git:', error);
@@ -852,19 +852,19 @@ export const synchronizations = [
     from: securityConcept,
     do: () => {
       console.log('[Sync] Session unlocked. Starting sync polling.');
-      syncConcept.actions.startPolling();
+      syncService.actions.startPolling();
     },
   },
   {
     when: 'sessionLocked',
     from: securityConcept,
     do: () => {
-      syncConcept.actions.stopPolling();
+      syncService.actions.stopPolling();
     },
   },
   {
     when: 'diagramsChanged',
-    from: syncConcept,
+    from: syncService,
     do: ({ projectId }) => {
       // If the sync affected the currently active project, reload the diagram list
       // to reflect any new, updated, or deleted files from the remote.
@@ -887,14 +887,14 @@ export const synchronizations = [
   // --- Sync Status UI ---
   {
     when: 'syncStarted',
-    from: syncConcept,
+    from: syncService,
     do: () => {
       uiConcept.actions.updateSyncStatus({ status: 'syncing', message: 'Syncing...' });
     },
   },
   {
     when: 'syncCompleted',
-    from: syncConcept,
+    from: syncService,
     do: ({ timestamp }) => {
       const time = new Date(timestamp).toLocaleTimeString();
       uiConcept.actions.updateSyncStatus({ status: 'success', message: `Synced at ${time}` });
@@ -902,7 +902,7 @@ export const synchronizations = [
   },
   {
     when: 'syncError',
-    from: syncConcept,
+    from: syncService,
     do: ({ error }) => {
       const message = error.message.includes('401') ? 'Sync failed: Invalid token' : 'Sync failed. Check console.';
       uiConcept.actions.updateSyncStatus({ status: 'error', message });
@@ -910,7 +910,7 @@ export const synchronizations = [
   },
   {
     when: 'conflictResolved',
-    from: syncConcept,
+    from: syncService,
     do: ({ originalTitle, conflictTitle }) => {
       const message = `A conflict was detected for "${originalTitle}".\n\n` +
                       `The file was updated with changes from the server.\n\n` +
@@ -923,12 +923,29 @@ export const synchronizations = [
 /**
  * Wires up the synchronizations by subscribing to events from one concept
  * and triggering actions in another.
+ *
+ * IMPORTANT: All synchronization handlers are wrapped in error handlers to prevent
+ * uncaught promise rejections. Errors are logged and shown to the user via notifications.
  */
 function setupSubscriptions() {
   synchronizations.forEach((sync) => {
     sync.from.subscribe((event, payload) => {
       if (event === sync.when) {
-        sync.do(payload);
+        // Wrap the handler to catch both sync and async errors
+        Promise.resolve(sync.do(payload)).catch((error) => {
+          console.error(`[Sync Error] Handler for "${sync.when}" failed:`, error);
+
+          // Show user-friendly error notification
+          try {
+            uiConcept.actions.showNotification({
+              message: `Operation failed: ${error.message || 'Unknown error'}`,
+              type: 'error'
+            });
+          } catch (notificationError) {
+            // If even notification fails, just log it
+            console.error('[Sync Error] Failed to show error notification:', notificationError);
+          }
+        });
       }
     });
   });
@@ -942,8 +959,27 @@ function setupSubscriptions() {
 export function initializeApp() {
   setupSubscriptions();
   console.log('[App] Initializing application: setting up UI and loading data...');
-  uiConcept.actions.initialize(); // Set up UI listeners and element cache
-  storageConcept.actions.init().then(() => {
-    projectConcept.actions.loadProjects();
-  });
+
+  try {
+    uiConcept.actions.initialize(); // Set up UI listeners and element cache
+  } catch (error) {
+    console.error('[App] Failed to initialize UI:', error);
+    // Show critical error - app cannot function without UI
+    alert(`Critical Error: Failed to initialize application.\n\n${error.message}\n\nPlease refresh the page.`);
+    return;
+  }
+
+  storageConcept.actions.init()
+    .then(() => {
+      console.log('[App] Storage initialized successfully');
+      projectConcept.actions.loadProjects();
+    })
+    .catch((error) => {
+      console.error('[App] Failed to initialize storage:', error);
+      uiConcept.actions.showNotification({
+        message: `Failed to initialize database: ${error.message}. Some features may not work.`,
+        type: 'error',
+        duration: 10000
+      });
+    });
 }
