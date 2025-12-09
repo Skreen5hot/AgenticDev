@@ -457,8 +457,34 @@ export const synchronizations = [
   {
     when: 'ui:editorContentChanged',
     from: uiConcept,
-    do: ({ content }) => {
-      diagramConcept.actions.updateActiveDiagramContent(content);
+    do: (() => {
+      // Debounce timer for auto-rendering
+      let renderDebounceTimer = null;
+
+      return ({ content }) => {
+        diagramConcept.actions.updateActiveDiagramContent(content);
+
+        // Auto-render diagram if diagram view is visible (split mode or diagram tab)
+        const diagramView = document.getElementById('diagram-view');
+        if (diagramView && diagramView.classList.contains('active')) {
+          // Debounce rendering to avoid excessive re-renders on every keystroke
+          clearTimeout(renderDebounceTimer);
+          renderDebounceTimer = setTimeout(() => {
+            uiConcept.actions.renderMermaidDiagram({ content });
+          }, 500); // Wait 500ms after user stops typing
+        }
+      };
+    })(),
+  },
+  {
+    when: 'ui:renderDiagramRequested',
+    from: uiConcept,
+    do: () => {
+      // Render the current active diagram content
+      const diagram = diagramConcept.state.activeDiagram;
+      if (diagram) {
+        uiConcept.actions.renderMermaidDiagram({ content: diagram.content });
+      }
     },
   },
   {
