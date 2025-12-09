@@ -125,8 +125,11 @@ export const syncService = {
         const [owner, repo] = project.repositoryPath.split('/');
         const diagramsPath = 'mermaid'; // Standard directory for diagrams
 
+        // Prepare options for git adapter calls (includes apiBaseUrl for self-hosted GitLab)
+        const gitOptions = project.apiBaseUrl ? { apiBaseUrl: project.apiBaseUrl } : {};
+
         // 1. Get the latest commit SHA and check if a pull is needed
-        const remoteCommit = await gitAbstractionConcept.actions.getLatestCommit(owner, repo, project.defaultBranch, token);
+        const remoteCommit = await gitAbstractionConcept.actions.getLatestCommit(owner, repo, project.defaultBranch, token, gitOptions);
         const remoteSha = remoteCommit.sha;
 
         // --- DETAILED LOGGING ---
@@ -138,15 +141,15 @@ export const syncService = {
         if (project.lastSyncSha && remoteSha === project.lastSyncSha) {
           console.log('[Sync] Remote has not changed. Skipping pull phase.');
         } else {
-          await pullChanges(project, token, owner, repo, diagramsPath);
+          await pullChanges(project, token, owner, repo, diagramsPath, gitOptions);
         }
 
         // 3. Process the local syncQueue (PUSH) - This should ALWAYS run.
-        await pushChanges(project, token, owner, repo, diagramsPath);
+        await pushChanges(project, token, owner, repo, diagramsPath, gitOptions);
 
         // 4. Update the project's last sync SHA
         // We fetch the commit SHA again *after* the push to get the most up-to-date state.
-        const finalRemoteCommit = await gitAbstractionConcept.actions.getLatestCommit(owner, repo, project.defaultBranch, token);
+        const finalRemoteCommit = await gitAbstractionConcept.actions.getLatestCommit(owner, repo, project.defaultBranch, token, gitOptions);
         project.lastSyncSha = finalRemoteCommit.sha;
         await storageConcept.actions.updateProject(project);
 
@@ -172,21 +175,21 @@ export const syncService = {
   notify,
 };
 
-async function pullChanges(project, token, owner, repo, diagramsPath) {
+async function pullChanges(project, token, owner, repo, diagramsPath, gitOptions = {}) {
   console.log('[Sync] Remote changes detected. Starting pull phase...');
-  
+
   let remoteFiles = [];
   try {
-    remoteFiles = await gitAbstractionConcept.actions.listContents(owner, repo, diagramsPath, token);
+    remoteFiles = await gitAbstractionConcept.actions.listContents(owner, repo, diagramsPath, token, gitOptions);
   } catch (error) {
     if (error.message.includes('404')) {
       console.log(`[Sync] Remote directory "${diagramsPath}" not found. Creating it...`);
       await gitAbstractionConcept.actions.putContents(
         owner, repo, `${diagramsPath}/.gitkeep`, '',
-        '[Mermaid-IDE] Initialize mermaid directory', null, token
+        '[Mermaid-IDE] Initialize mermaid directory', null, token, gitOptions
       );
       // After creating the directory, we must re-fetch the contents to see if other files exist.
-      remoteFiles = await gitAbstractionConcept.actions.listContents(owner, repo, diagramsPath, token);
+      remoteFiles = await gitAbstractionConcept.actions.listContents(owner, repo, diagramsPath, token, gitOptions);
     } else {
       throw error;
     }
@@ -211,7 +214,7 @@ async function pullChanges(project, token, owner, repo, diagramsPath) {
 
     if (!localMatch) {
       console.log(`[Sync] New remote file found: ${remoteFile.name}. Downloading...`);
-      const downloadPromise = gitAbstractionConcept.actions.getContents(owner, repo, remoteFile.path, token)
+      const downloadPromise = gitAbstractionConcept.actions.getContents(owner, repo, remoteFile.path, token, gitOptions)
         .then(({ content, sha }) => storageConcept.actions.addDiagram({
           projectId: project.id, title: remoteFile.name, content,
           lastModifiedRemoteSha: sha, createdAt: new Date(), updatedAt: new Date(),
@@ -226,7 +229,7 @@ async function pullChanges(project, token, owner, repo, diagramsPath) {
       // we overwrite the local version, regardless of local changes.
       // Pending local changes in the queue will be handled during the push phase.
       console.log(`[Pull] Conflict or update detected for "${remoteFile.name}". Remote version wins. Downloading...`);
-      const updatePromise = gitAbstractionConcept.actions.getContents(owner, repo, remoteFile.path, token)
+      const updatePromise = gitAbstractionConcept.actions.getContents(owner, repo, remoteFile.path, token, gitOptions)
         .then(({ content, sha }) => storageConcept.actions.updateDiagram({ ...localMatch, content, lastModifiedRemoteSha: sha, updatedAt: new Date() }))
         .catch((error) => {
           console.error(`[Pull] Failed to update "${remoteFile.name}":`, error);
@@ -254,7 +257,7 @@ async function pullChanges(project, token, owner, repo, diagramsPath) {
   console.log('[Pull] Pull phase completed successfully');
 }
 
-async function pushChanges(project, token, owner, repo, diagramsPath) {
+async function pushChanges(project, token, owner, repo, diagramsPath, gitOptions = {}) {
   const allSyncQueueItems = await storageConcept.actions.getSyncQueueItems();
   const projectSyncQueueItems = allSyncQueueItems.filter(item => item.projectId === project.id);
 
@@ -269,7 +272,7 @@ async function pushChanges(project, token, owner, repo, diagramsPath) {
         let response;
         switch (action) {
           case 'create':
-            response = await gitAbstractionConcept.actions.putContents(owner, repo, filePath, payload.content, commitMessage, null, token);
+            response = await gitAbstractionConcept.actions.putContents(owner, repo, filePath, payload.content, commitMessage, null, token, gitOptions);
             const createdDiagram = await storageConcept.actions.getDiagram(item.diagramId);
             if (createdDiagram) {
               createdDiagram.lastModifiedRemoteSha = response.content.sha;
@@ -277,7 +280,7 @@ async function pushChanges(project, token, owner, repo, diagramsPath) {
             }
             break;
           case 'update':
-            response = await gitAbstractionConcept.actions.putContents(owner, repo, filePath, payload.content, commitMessage, payload.sha, token);
+            response = await gitAbstractionConcept.actions.putContents(owner, repo, filePath, payload.content, commitMessage, payload.sha, token, gitOptions);
             const updatedDiagram = await storageConcept.actions.getDiagram(item.diagramId);
             if (updatedDiagram) {
               updatedDiagram.lastModifiedRemoteSha = response.content.sha;
@@ -285,14 +288,14 @@ async function pushChanges(project, token, owner, repo, diagramsPath) {
             }
             break;
           case 'delete':
-            await gitAbstractionConcept.actions.deleteContents(owner, repo, filePath, commitMessage, payload.sha, token);
+            await gitAbstractionConcept.actions.deleteContents(owner, repo, filePath, commitMessage, payload.sha, token, gitOptions);
             break;
           case 'rename':
             const oldFilePath = `${diagramsPath}/${payload.oldTitle}`;
             const newFilePath = `${diagramsPath}/${payload.newTitle}`;
             const renameCommitMessage = `[Mermaid-IDE] rename ${payload.oldTitle} to ${payload.newTitle}`;
-            await gitAbstractionConcept.actions.deleteContents(owner, repo, oldFilePath, renameCommitMessage, payload.sha, token);
-            await gitAbstractionConcept.actions.putContents(owner, repo, newFilePath, payload.content, renameCommitMessage, null, token);
+            await gitAbstractionConcept.actions.deleteContents(owner, repo, oldFilePath, renameCommitMessage, payload.sha, token, gitOptions);
+            await gitAbstractionConcept.actions.putContents(owner, repo, newFilePath, payload.content, renameCommitMessage, null, token, gitOptions);
             break;
         }
         await storageConcept.actions.deleteSyncQueueItem(item.id);
@@ -307,7 +310,7 @@ async function pushChanges(project, token, owner, repo, diagramsPath) {
           await storageConcept.actions.deleteSyncQueueItem(item.id); // Remove the failed item from the queue
 
           // --- FIX: Immediately fetch the remote version to resolve the conflict ---
-          const remoteContent = await gitAbstractionConcept.actions.getContents(owner, repo, filePath, token);
+          const remoteContent = await gitAbstractionConcept.actions.getContents(owner, repo, filePath, token, gitOptions);
           const diagramToUpdate = await storageConcept.actions.getDiagram(item.diagramId);
           if (diagramToUpdate) {
             diagramToUpdate.content = remoteContent.content;
