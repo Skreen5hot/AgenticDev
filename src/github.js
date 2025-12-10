@@ -23,22 +23,43 @@ function unicodeBtoa(str) {
 const _sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Constructs the full API URL for GitHub or GitHub Enterprise.
+ * @param {string} path - The API path (e.g., 'repos/owner/repo').
+ * @param {string} [apiBaseUrl] - Optional custom API base URL for GitHub Enterprise.
+ * @returns {string} The full API URL.
+ */
+function _buildApiUrl(path, apiBaseUrl) {
+  if (apiBaseUrl) {
+    // GitHub Enterprise instances typically use /api/v3 path
+    // Example: https://github.company.com/api/v3
+    const baseUrl = apiBaseUrl.endsWith('/api/v3') ? apiBaseUrl : `${apiBaseUrl}/api/v3`;
+    return `${baseUrl}/${path}`;
+  }
+  // Default to public GitHub
+  return `${GITHUB_API_BASE}/${path}`;
+}
+
+/**
  * A helper function to handle common fetch logic for the GitHub API.
- * @param {string} url - The full URL to fetch.
+ * @param {string} path - The API path (e.g., 'repos/owner/repo').
  * @param {string} token - The user's GitHub personal access token.
- * @param {RequestInit} options - Additional fetch options.
+ * @param {object} [fetchOptions={}] - Additional fetch options (method, body, headers).
+ * @param {object} [adapterOptions={}] - Adapter-level options like apiBaseUrl.
+ * @param {number} [retries=3] - Number of retry attempts.
+ * @param {number} [backoff=1000] - Initial backoff delay in milliseconds.
  * @returns {Promise<any>} The JSON response.
  */
-async function _githubFetch(url, token, options = {}, retries = 3, backoff = 1000) {
+async function _githubFetch(path, token, fetchOptions = {}, adapterOptions = {}, retries = 3, backoff = 1000) {
+  const url = _buildApiUrl(path, adapterOptions.apiBaseUrl);
   let lastError;
   for (let i = 0; i < retries; i++) {
     const headers = {
       Accept: 'application/vnd.github.v3+json',
       Authorization: `Bearer ${token}`,
-      ...options.headers,
+      ...fetchOptions.headers,
     };
 
-    const response = await fetch(url, { ...options, headers });
+    const response = await fetch(url, { ...fetchOptions, headers });
 
     if (response.ok) {
       // Handle responses with no content (e.g., 204 No Content for DELETE)
@@ -93,11 +114,11 @@ export const githubAdapter = {
    * @param {string} owner - The repository owner.
    * @param {string} repo - The repository name.
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<{default_branch: string}>}
    */
-  getRepoInfo(owner, repo, token) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}`;
-    return _githubFetch(url, token);
+  getRepoInfo(owner, repo, token, options = {}) {
+    return _githubFetch(`repos/${owner}/${repo}`, token, {}, options);
   },
 
   /**
@@ -106,11 +127,11 @@ export const githubAdapter = {
    * @param {string} repo - The repository name.
    * @param {string} path - The directory path (e.g., 'mermaid').
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<any[]>} An array of file/directory objects.
    */
-  listContents(owner, repo, path, token) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`;
-    return _githubFetch(url, token);
+  listContents(owner, repo, path, token, options = {}) {
+    return _githubFetch(`repos/${owner}/${repo}/contents/${path}`, token, {}, options);
   },
 
   /**
@@ -119,11 +140,11 @@ export const githubAdapter = {
    * @param {string} repo - The repository name.
    * @param {string} path - The full file path.
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<{content: string, sha: string}>} Decoded content and file SHA.
    */
-  async getContents(owner, repo, path, token) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`;
-    const response = await _githubFetch(url, token);
+  async getContents(owner, repo, path, token, options = {}) {
+    const response = await _githubFetch(`repos/${owner}/${repo}/contents/${path}`, token, {}, options);
     // GitHub API returns content base64 encoded.
     return {
       content: atob(response.content),
@@ -137,15 +158,16 @@ export const githubAdapter = {
    * @param {string} repo - The repository name.
    * @param {string} path - The directory path.
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<string | null>} The SHA of the tree, or null if not found.
    */
-  async getTreeSha(owner, repo, path, token) {
+  async getTreeSha(owner, repo, path, token, options = {}) {
     // This is a more direct way to get the SHA of a specific directory.
     // We get the contents of the parent directory and find our target directory's entry.
     // For the root 'mermaid' directory, the parent is the root of the repo.
     const parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
     try {
-      const parentContents = await this.listContents(owner, repo, parentPath, token);
+      const parentContents = await this.listContents(owner, repo, parentPath, token, options);
       const pathEntry = parentContents.find(entry => entry.path === path && entry.type === 'dir');
 
       // If the directory doesn't exist, GitHub returns an object with a message.
@@ -169,20 +191,20 @@ export const githubAdapter = {
    * @param {string} message - The commit message.
    * @param {string | null} sha - The blob SHA, required for updates. Null for new files.
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<any>}
    */
-  putContents(owner, repo, path, content, message, sha, token) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`;
+  putContents(owner, repo, path, content, message, sha, token, options = {}) {
     const body = {
       message,
       content: unicodeBtoa(content), // Content must be base64 encoded.
       sha, // If sha is null, GitHub treats it as a new file create.
     };
-    return _githubFetch(url, token, {
+    return _githubFetch(`repos/${owner}/${repo}/contents/${path}`, token, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }, options);
   },
 
   /**
@@ -193,16 +215,16 @@ export const githubAdapter = {
    * @param {string} message - The commit message.
    * @param {string} sha - The blob SHA, required for deletion.
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<any>}
    */
-  deleteContents(owner, repo, path, message, sha, token) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`;
+  deleteContents(owner, repo, path, message, sha, token, options = {}) {
     const body = { message, sha };
-    return _githubFetch(url, token, {
+    return _githubFetch(`repos/${owner}/${repo}/contents/${path}`, token, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }, options);
   },
 
   /**
@@ -211,11 +233,11 @@ export const githubAdapter = {
    * @param {string} repo - The repository name.
    * @param {string} branch - The branch name.
    * @param {string} token - The user's PAT.
+   * @param {object} [options={}] - Options, including apiBaseUrl for GitHub Enterprise.
    * @returns {Promise<{sha: string}>} An object containing the commit SHA.
    */
-  async getLatestCommit(owner, repo, branch, token) {
-    const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${branch}`;
-    const branchInfo = await _githubFetch(url, token);
+  async getLatestCommit(owner, repo, branch, token, options = {}) {
+    const branchInfo = await _githubFetch(`repos/${owner}/${repo}/branches/${branch}`, token, {}, options);
     return { sha: branchInfo.commit.sha };
   },
 };
