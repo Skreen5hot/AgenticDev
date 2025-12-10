@@ -187,6 +187,7 @@ export const gitlabAdapter = {
       branch: default_branch,
       content: unicodeBtoa(content),
       commit_message: message,
+      encoding: 'base64',
     };
 
     // GitLab uses POST for create and PUT for update.

@@ -329,6 +329,24 @@ async function pushChanges(project, token, owner, repo, diagramsPath, gitOptions
         } else if (item.action === 'delete' && error.message.includes('404')) {
           console.warn(`[Sync] Delete failed with 404 for queue item #${item.id}. File likely already deleted. Removing from queue.`);
           await storageConcept.actions.deleteSyncQueueItem(item.id); // Remove the failed item from the queue
+        } else if (item.action === 'create' && error.message.includes('A file with this name already exists')) {
+          // GitLab-specific: File already exists, fetch its SHA and convert to update
+          console.warn(`[Sync] Create failed for "${payload.title}" - file already exists. Converting to update operation.`);
+          try {
+            const remoteFile = await gitAbstractionConcept.actions.getContents(owner, repo, filePath, token, gitOptions);
+            // Update the diagram with the remote SHA
+            const diagram = await storageConcept.actions.getDiagram(item.diagramId);
+            if (diagram) {
+              diagram.lastModifiedRemoteSha = remoteFile.sha;
+              await storageConcept.actions.updateDiagram(diagram);
+              // Remove the create queue item - it will be re-added as update on next save
+              await storageConcept.actions.deleteSyncQueueItem(item.id);
+              console.log(`[Sync] Updated diagram "${payload.title}" with remote SHA. Removed create queue item.`);
+            }
+          } catch (fetchError) {
+            console.error(`[Sync] Failed to fetch remote file SHA for "${payload.title}":`, fetchError);
+            // Leave in queue to retry
+          }
         } else {
           console.error(`[Sync] Failed to process queue item #${item.id} (${action}):`, error);
           // For other errors, we leave the item in the queue to be retried.
