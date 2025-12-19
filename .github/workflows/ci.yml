@@ -56,6 +56,12 @@ jobs:
         run: npm run security-check
 
       # UI tests: Only on main/dev branches (slower, more comprehensive)
+      - name: Install Chrome for UI tests
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
       - name: Install UI test framework dependencies
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
         run: |
@@ -66,7 +72,8 @@ jobs:
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
         run: |
           cd ui-test-framework
-          npm test -- --headless
+          export CHROME_PATH=$(which chrome)
+          npm test
         env:
           CI: true
 
