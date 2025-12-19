@@ -586,6 +586,100 @@ Based on the element snapshots in the trace:
 
 ---
 
+## Running in CI/CD Environments
+
+### GitHub Actions Setup
+
+The framework is optimized for containerized CI environments. Here's a complete setup:
+
+```yaml
+- name: Install Chrome for UI tests
+  uses: browser-actions/setup-chrome@v2
+  with:
+    chrome-version: stable
+
+- name: Install dependencies
+  run: |
+    cd ui-test-framework
+    npm install
+
+- name: Run UI tests
+  run: |
+    cd ui-test-framework
+    export CHROME_PATH=$(which chrome)
+    npm test
+  env:
+    CI: true
+```
+
+### CI-Specific Behavior
+
+When `CI=true` environment variable is set, the framework automatically:
+
+1. **Disables Chrome Sandboxing**: Adds `--no-sandbox` and `--disable-setuid-sandbox` flags (required in containers)
+2. **Optimizes Resource Usage**: Adds `--disable-dev-shm-usage` to overcome `/dev/shm` limitations
+3. **Enables Diagnostic Logging**: Outputs Chrome stdout/stderr for debugging
+4. **Uses IPv4 Explicitly**: Connects to `127.0.0.1` instead of `localhost` to avoid IPv6 issues
+
+### Troubleshooting CI Failures
+
+#### Chrome Won't Start
+
+**Error**: `No usable sandbox!` or `FATAL:zygote_host_impl_linux.cc`
+
+**Solution**: Ensure `CI=true` environment variable is set. This automatically adds required flags.
+
+#### Connection Timeouts
+
+**Error**: `ECONNREFUSED 127.0.0.1:xxxxx` or `Browser did not become ready`
+
+**Causes**:
+- Chrome process not fully terminated from previous test
+- Port still bound after process exit
+- Slow I/O in CI environment
+
+**Solutions**:
+1. Increase cleanup delays in `beforeEach`/`afterEach` hooks
+2. Ensure proper cleanup in test teardown
+3. Use `process.kill(pid, 0)` to verify process termination
+
+#### DBus Errors (Non-Fatal)
+
+**Error**: `Failed to connect to the bus: Could not parse server address`
+
+**Impact**: None - these are harmless warnings in headless environments
+
+**Explanation**: Chrome tries to connect to D-Bus for desktop integration, which doesn't exist in containers
+
+### Performance Expectations
+
+Typical CI test durations (Ubuntu GitHub Actions runner):
+
+- **Browser launch**: 1-2 seconds
+- **Simple test**: 2-3 seconds
+- **Full suite (45 tests)**: 60-75 seconds
+- **Cleanup between tests**: 3 seconds (to ensure port release)
+
+### Diagnostic Output
+
+With `CI=true`, you'll see detailed logging:
+
+```
+[Browser Launch] Executable: /opt/hostedtoolcache/setup-chrome/chrome/stable/x64/chrome
+[Browser Launch] CDP Port: 43525
+[Browser Launch] Args: --disable-background-timer-throttling --headless --no-sandbox ...
+[Browser Launch] Process spawned with PID: 2519
+[Chrome stderr]: DevTools listening on ws://127.0.0.1:43525/devtools/browser/...
+```
+
+This helps diagnose:
+- Chrome executable path issues
+- Launch argument problems
+- Process spawn failures
+- CDP connection issues
+
+---
+
 ## Related Documentation
 
 - [Unit Testing Framework](../unit-tests/README.md) - Process-level isolated unit tests for concepts and synchronizations
