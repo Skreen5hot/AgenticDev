@@ -430,6 +430,14 @@ export function buildLaunchArgs(config) {
     args.push(`--window-size=${config.viewport.width},${config.viewport.height}`);
   }
 
+  // In CI environments, Chrome needs --no-sandbox to run in containers
+  // This is safe because CI environments are ephemeral and isolated
+  if (process.env.CI) {
+    args.push('--no-sandbox');
+    args.push('--disable-setuid-sandbox');
+    args.push('--disable-dev-shm-usage'); // Overcome limited resource problems
+  }
+
   return args;
 }
 
