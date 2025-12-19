@@ -449,7 +449,8 @@ export async function waitForBrowserReady(port, timeout = 30000) {
 
   while (Date.now() - startTime < timeout) {
     try {
-      await fetchJSON(`http://localhost:${port}/json/version`);
+      // Use 127.0.0.1 instead of localhost to avoid IPv6 issues on Linux
+      await fetchJSON(`http://127.0.0.1:${port}/json/version`);
       return; // Browser is ready
     } catch (err) {
       lastError = err;
@@ -474,7 +475,8 @@ export async function waitForBrowserReady(port, timeout = 30000) {
  */
 export async function getWebSocketEndpoint(port) {
   try {
-    const version = await fetchJSON(`http://localhost:${port}/json/version`);
+    // Use 127.0.0.1 instead of localhost to avoid IPv6 issues on Linux
+    const version = await fetchJSON(`http://127.0.0.1:${port}/json/version`);
     return version.webSocketDebuggerUrl;
   } catch (err) {
     throw new Error(`Failed to get WebSocket endpoint: ${err.message}`);
