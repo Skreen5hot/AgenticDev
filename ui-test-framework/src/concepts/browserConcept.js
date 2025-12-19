@@ -55,17 +55,53 @@ export const browserConcept = {
       self.state.cdpPort = await findAvailablePort();
       args.push(`--remote-debugging-port=${self.state.cdpPort}`);
 
+      // In CI, log launch details for debugging
+      if (process.env.CI) {
+        console.log('[Browser Launch] Executable:', self.state.config.executablePath);
+        console.log('[Browser Launch] CDP Port:', self.state.cdpPort);
+        console.log('[Browser Launch] Args:', args.join(' '));
+      }
+
       // 5. Spawn browser process
       self.state.process = spawn(self.state.config.executablePath, args, {
         stdio: 'pipe',
         detached: false
       });
 
+      // Log PID in CI
+      if (process.env.CI) {
+        console.log('[Browser Launch] Process spawned with PID:', self.state.process.pid);
+      }
+
+      // Capture Chrome output for debugging (especially useful in CI)
+      let chromeStderr = '';
+      let chromeStdout = '';
+
+      if (self.state.process.stdout) {
+        self.state.process.stdout.on('data', (data) => {
+          chromeStdout += data.toString();
+          // In CI environment, log Chrome output
+          if (process.env.CI) {
+            console.log('[Chrome stdout]:', data.toString().trim());
+          }
+        });
+      }
+
+      if (self.state.process.stderr) {
+        self.state.process.stderr.on('data', (data) => {
+          chromeStderr += data.toString();
+          // In CI environment, log Chrome errors
+          if (process.env.CI) {
+            console.error('[Chrome stderr]:', data.toString().trim());
+          }
+        });
+      }
+
       // Handle process exit
       self.state.process.on('exit', (code, signal) => {
         if (code !== 0 && code !== null) {
           const error = new BrowserCrashError({
-            message: `Browser process exited with code ${code}`,
+            message: `Browser process exited with code ${code}. stderr: ${chromeStderr.slice(-500)}`,
             exitCode: code,
             signal,
             pid: self.state.process?.pid
