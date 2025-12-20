@@ -21,6 +21,7 @@ export const browserConcept = {
     messageId: 0,            // CDP message ID counter
     pendingMessages: new Map(), // Pending CDP responses
     sessions: new Map(),     // Target sessions (targetId -> sessionId)
+    defaultPageTarget: null, // Default page target and session {targetId, sessionId}
     isClosing: false,        // Flag to track intentional closure
     config: {
       executablePath: '',
@@ -228,12 +229,24 @@ export const browserConcept = {
         throw new Error('CDP WebSocket not connected');
       }
 
+      // Auto-detect if this command needs a page session
+      const needsPageSession = isPageCommand(method);
+      let targetSessionId = sessionId;
+
+      if (needsPageSession && !sessionId) {
+        // Ensure we have a default page target
+        if (!self.state.defaultPageTarget) {
+          self.state.defaultPageTarget = await self.actions.getPageTarget();
+        }
+        targetSessionId = self.state.defaultPageTarget.sessionId;
+      }
+
       const id = ++self.state.messageId;
       const message = { id, method, params };
 
-      // Add sessionId if provided (for target-specific commands)
-      if (sessionId) {
-        message.sessionId = sessionId;
+      // Add sessionId if needed (for target-specific commands)
+      if (targetSessionId) {
+        message.sessionId = targetSessionId;
       }
 
       return new Promise((resolve, reject) => {
@@ -305,6 +318,15 @@ export const browserConcept = {
       // Attach to the target
       const sessionId = await self.actions.attachToTarget(pageTarget.targetId);
 
+      // Enable necessary CDP domains for this session
+      // These enables are sent with the sessionId to configure the target
+      try {
+        await self.actions.sendCDPCommand('Page.enable', {}, sessionId);
+        await self.actions.sendCDPCommand('Runtime.enable', {}, sessionId);
+      } catch (err) {
+        // Domains may already be enabled, that's okay
+      }
+
       return {
         targetId: pageTarget.targetId,
         sessionId
@@ -372,6 +394,7 @@ export const browserConcept = {
         self.state.wsEndpoint = null;
         self.state.process = null;
         self.state.cdpPort = null;
+        self.state.defaultPageTarget = null;
         self.state.isClosing = false;
         self.state.pendingMessages.clear();
         self.state.sessions.clear();
@@ -550,4 +573,45 @@ function fetchJSON(url) {
       });
     }).on('error', reject);
   });
+}
+
+/**
+ * Check if a CDP command needs to be sent to a page session
+ * @param {string} method - CDP method name
+ * @returns {boolean} True if command needs page session
+ */
+function isPageCommand(method) {
+  // List of CDP domains that require a page/target session
+  const pageSpecificDomains = [
+    'Page',
+    'Runtime',
+    'DOM',
+    'Network',
+    'Emulation',
+    'Input',
+    'Console',
+    'Debugger',
+    'Profiler',
+    'HeapProfiler',
+    'CSS',
+    'Animation',
+    'Accessibility',
+    'Storage',
+    'IndexedDB',
+    'CacheStorage',
+    'ApplicationCache',
+    'Performance',
+    'Security',
+    'Audits',
+    'WebAudio',
+    'WebAuthn',
+    'Media',
+    'Fetch',
+    'BackgroundService',
+    'Cast',
+    'HeadlessExperimental'
+  ];
+
+  const domain = method.split('.')[0];
+  return pageSpecificDomains.includes(domain);
 }
