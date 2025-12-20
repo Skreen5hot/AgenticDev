@@ -323,6 +323,22 @@ export const browserConcept = {
       try {
         await self.actions.sendCDPCommand('Page.enable', {}, sessionId);
         await self.actions.sendCDPCommand('Runtime.enable', {}, sessionId);
+
+        // Set viewport size via device metrics override for consistent behavior
+        // This ensures innerWidth/innerHeight match the specified viewport exactly
+        try {
+          await self.actions.sendCDPCommand('Emulation.setDeviceMetricsOverride', {
+            width: self.state.config.viewport.width,
+            height: self.state.config.viewport.height,
+            deviceScaleFactor: 0,  // 0 = use default scale factor
+            mobile: false,
+            screenWidth: self.state.config.viewport.width,
+            screenHeight: self.state.config.viewport.height
+          }, sessionId);
+        } catch (emulationErr) {
+          // Emulation not supported or failed, viewport will use window-size only
+          // This is okay - not all environments support emulation
+        }
       } catch (err) {
         // Domains may already be enabled, that's okay
       }
