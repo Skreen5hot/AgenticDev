@@ -24,7 +24,10 @@
       "Bash(CI=true npm test)",
       "Bash(git checkout:*)",
       "Bash(git push:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(npm install:*)",
+      "Bash(node --test:*)",
+      "Bash(grep:*)"
     ]
   }
 }
