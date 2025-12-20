@@ -79,8 +79,9 @@ jobs:
 
   # 🎯 UNIFIED DEPLOYMENT JOB
   # Deploys main to root (/) and dev to /dev/ subdirectory
+  # Only deploys from main branch to avoid concurrent deployments
   deploy:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
+    if: github.ref == 'refs/heads/main'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -104,50 +105,40 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # Prepare combined deployment directory
+      # Prepare combined deployment directory with both main and dev versions
       - name: Prepare deployment structure
         run: |
           mkdir -p _site
 
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "📦 Deploying MAIN gitDataPOC to root path"
+          echo "📦 Building multi-environment deployment"
+          echo "  - Main branch → / (root)"
+          echo "  - Dev branch → /dev/"
 
-            # Deploy gitDataPOC app to root
-            cp -r gitDataPOC/* _site/
-          else
-            echo "📦 Deploying DEV to /dev/ path"
+          # Deploy main branch (current checkout) to root
+          echo "Deploying main gitDataPOC to root..."
+          cp -r gitDataPOC/* _site/
 
-            # Build main branch gitDataPOC for root path
-            git fetch origin main
-            git checkout origin/main
-            npm install
+          # Fetch and deploy dev branch to /dev/
+          git fetch origin dev
+          git checkout origin/dev
 
-            echo "Deploying main gitDataPOC to root..."
-            cp -r gitDataPOC/* _site/
+          echo "Deploying dev gitDataPOC to /dev/..."
+          mkdir -p _site/dev
+          cp -r gitDataPOC/* _site/dev/
 
-            # Build dev branch gitDataPOC for /dev/ path
-            git checkout -
-            npm install
+          # Add base tag to dev index.html for proper path resolution
+          REPO_NAME="${{ github.repository }}"
+          REPO_NAME="${REPO_NAME#*/}"  # Remove owner/ prefix
+          BASE_PATH="/${REPO_NAME}/dev/"
 
-            echo "Deploying dev gitDataPOC to /dev/..."
-            mkdir -p _site/dev
-            cp -r gitDataPOC/* _site/dev/
+          echo "📍 Setting base path to: ${BASE_PATH}"
 
-            # Add base tag to dev index.html for proper path resolution
-            # Extract repository name from GitHub context
-            REPO_NAME="${{ github.repository }}"
-            REPO_NAME="${REPO_NAME#*/}"  # Remove owner/ prefix
-            BASE_PATH="/${REPO_NAME}/dev/"
+          # Insert base tag after </title>
+          awk -v base="$BASE_PATH" '/<\/title>/ {print; print "    <base href=\"" base "\">"; next} 1' _site/dev/index.html > _site/dev/index.html.tmp
+          mv _site/dev/index.html.tmp _site/dev/index.html
 
-            echo "📍 Setting base path to: ${BASE_PATH}"
-
-            # Insert after the closing </title> tag
-            awk -v base="$BASE_PATH" '/<\/title>/ {print; print "    <base href=\"" base "\">"; next} 1' _site/dev/index.html > _site/dev/index.html.tmp
-            mv _site/dev/index.html.tmp _site/dev/index.html
-
-            echo "✅ Base tag added to dev index.html"
-            grep -A 1 "</title>" _site/dev/index.html | head -2
-          fi
+          echo "✅ Base tag added to dev index.html"
+          grep -A 1 "</title>" _site/dev/index.html | head -2
 
           # Create environments index for easy navigation
           cat > _site/environments.html << 'EOF'
