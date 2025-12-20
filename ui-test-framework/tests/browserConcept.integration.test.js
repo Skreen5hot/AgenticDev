@@ -118,52 +118,6 @@ test('browser emits browserLaunched event', async (t) => {
   }
 });
 
-// NOTE: This test is skipped by default due to resource exhaustion issues on Windows
-// when running many browser instances in rapid succession. The browser close event
-// functionality is tested indirectly by other tests that use close().
-test('browser emits browserClosed event', { skip: true }, async (t) => {
-  await ensureCleanState();
-
-  const events = [];
-  browserConcept.subscribe((event, payload) => {
-    events.push({ event, payload });
-  });
-
-  await browserConcept.actions.launch({
-    executablePath: CHROME_PATH,
-    headless: true
-  });
-
-  await browserConcept.actions.close();
-
-  // Check for browserClosed event
-  const closeEvent = events.find(e => e.event === 'browserClosed');
-  assert.ok(closeEvent, 'browserClosed event should be emitted');
-});
-
-// NOTE: This test is skipped by default due to resource exhaustion issues on Windows
-// when running many browser instances in rapid succession. CDP command functionality
-// is tested by the example-ui tests which actually use Page.navigate, Runtime.evaluate, etc.
-test('sendCDPCommand works correctly', { skip: true }, async (t) => {
-  await ensureCleanState();
-
-  try {
-    await browserConcept.actions.launch({
-      executablePath: CHROME_PATH,
-      headless: true
-    });
-
-    // Send a simple CDP command to get browser version
-    const result = await browserConcept.actions.sendCDPCommand('Browser.getVersion');
-
-    assert.ok(result, 'CDP command should return result');
-    assert.ok(result.product, 'Result should include product info');
-    assert.ok(result.userAgent, 'Result should include user agent');
-  } finally {
-    await browserConcept.actions.close();
-  }
-});
-
 test('sendCDPCommand throws when not connected', async (t) => {
   await ensureCleanState();
 
