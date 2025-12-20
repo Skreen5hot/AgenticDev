@@ -7,6 +7,7 @@
  * - Offline fallback page
  * - Background sync for queued operations
  * - Push notifications support
+ * - GitHub Pages support with dev/prod environments
  *
  * Edge Computing Principle:
  * Process and cache data at the edge (user's device) to reduce
@@ -16,15 +17,31 @@
 const CACHE_VERSION = 'v1';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
-const OFFLINE_PAGE = '/offline.html';
 
-// Static assets to cache immediately
+// Detect environment and base path
+// For GitHub Pages: main branch deploys to /<repo>/, dev branch to /<repo>/dev/
+const BASE_PATH = self.location.pathname.match(/^\/[^\/]+\/(dev\/)?/)?.[0] || '/';
+const IS_DEV = BASE_PATH.includes('/dev/');
+const ENV = IS_DEV ? 'dev' : 'prod';
+
+console.log(`[Service Worker] Environment: ${ENV}, Base path: ${BASE_PATH}`);
+
+// Helper to resolve paths relative to base
+const resolvePath = (path) => {
+  if (path.startsWith('http')) return path;
+  if (path.startsWith('/')) return BASE_PATH + path.slice(1);
+  return BASE_PATH + path;
+};
+
+const OFFLINE_PAGE = resolvePath('offline.html');
+
+// Static assets to cache immediately (with base path)
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/src/index.js',
-  '/src/assert.js',
+  resolvePath(''),
+  resolvePath('index.html'),
+  resolvePath('manifest.json'),
+  resolvePath('src/index.js'),
+  resolvePath('src/assert.js'),
   OFFLINE_PAGE
 ];
 
@@ -91,8 +108,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Skip requests outside our base path (important for GitHub Pages multi-environment setup)
+  if (!url.pathname.startsWith(BASE_PATH) && BASE_PATH !== '/') {
+    return;
+  }
+
   // API requests: Network-first strategy
-  if (url.pathname.startsWith('/api/')) {
+  if (url.pathname.includes('/api/')) {
     event.respondWith(networkFirstStrategy(request));
     return;
   }

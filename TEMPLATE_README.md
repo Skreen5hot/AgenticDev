@@ -125,6 +125,7 @@ npm run test:all
 - **[Concepts + Synchronizations Pattern](./docs/ARCHITECTURE.md)** - Core architectural pattern
 - **[Test Strategy](./testStrategy.md)** - Testing philosophy and best practices
 - **[Agentic Development Guide](./agenticDevlopment.md)** - AI-agent collaboration patterns
+- **[GitHub Pages PWA Deployment](./docs/GITHUB_PAGES_PWA.md)** - Multi-environment PWA deployment guide
 
 ### Testing Guides
 - **[Unit Testing README](./unit-tests/README.md)** - Complete unit testing guide
@@ -302,11 +303,33 @@ This template includes complete PWA support for offline-first, installable appli
 
 #### 2. Register Service Worker
 
+**For GitHub Pages (Recommended)**:
+
+```html
+<!-- index.html -->
+<head>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#4a90e2">
+</head>
+<body>
+  <!-- This handles environment detection automatically -->
+  <script type="module" src="./src/manifest-generator.js"></script>
+</body>
+```
+
+The [manifest-generator.js](src/manifest-generator.js) automatically:
+- Detects dev vs prod environment
+- Generates appropriate manifest with correct paths
+- Registers service worker with correct scope
+- Uses different theme colors (blue for prod, yellow for dev)
+
+**For Custom Setup**:
+
 ```javascript
-// In your main JavaScript file
+// Manual service worker registration
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
+    navigator.serviceWorker.register('./service-worker.js')
       .then(registration => {
         console.log('[PWA] Service Worker registered:', registration.scope);
       })
@@ -389,20 +412,27 @@ await storageConcept.actions.processSyncQueue();
 
 ### Customizing the PWA
 
-**Update App Metadata** ([manifest.json:1-32](manifest.json#L1-L32)):
+**Update App Metadata** ([manifest-generator.js](src/manifest-generator.js)):
+- Modify the `generateManifest()` function
 - Change `name`, `short_name`, `description`
 - Update `theme_color` and `background_color`
 - Add app icons to `/icons/` directory
 
-**Customize Caching** ([service-worker.js:1-252](service-worker.js#L1-L252)):
+**Customize Caching** ([service-worker.js](service-worker.js)):
 - Modify `STATIC_ASSETS` array
 - Adjust cache strategies
 - Add custom offline pages
 
-**Extend Storage Schema** ([storageConcept.js:1-421](src/concepts/storageConcept.js#L1-L421)):
+**Extend Storage Schema** ([storageConcept.js](src/concepts/storageConcept.js)):
 - Add object stores in `init()`
 - Create custom indexes
 - Implement domain-specific queries
+
+**GitHub Pages Deployment** ([GITHUB_PAGES_PWA.md](docs/GITHUB_PAGES_PWA.md)):
+- Automatic dev/prod environment detection
+- Separate caches and databases per environment
+- Different theme colors for visual distinction
+- See full guide for details
 
 ### Testing PWA Features
 

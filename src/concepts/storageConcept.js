@@ -26,7 +26,8 @@ export const storageConcept = {
     isOpen: false,
     stores: {}, // Track object stores
     error: null,
-    pendingSyncs: [] // Operations waiting to sync to server
+    pendingSyncs: [], // Operations waiting to sync to server
+    environment: null // 'dev' or 'prod'
   },
 
   /**
@@ -46,7 +47,16 @@ export const storageConcept = {
           throw new Error('IndexedDB is not supported in this browser');
         }
 
-        const dbName = config.dbName || self.state.dbName;
+        // Detect environment (dev/prod) for separate databases
+        const isDev = window?.location?.pathname?.includes('/dev/');
+        self.state.environment = isDev ? 'dev' : 'prod';
+
+        // Use environment-specific database name to avoid conflicts
+        let dbName = config.dbName || self.state.dbName;
+        if (isDev && !dbName.includes('-dev')) {
+          dbName = `${dbName}-dev`;
+        }
+
         const dbVersion = config.dbVersion || self.state.dbVersion;
 
         // Open database connection
