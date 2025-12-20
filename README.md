@@ -1,46 +1,65 @@
-# mermaid
+# Agentic Project Baseline Template
 
-## Mermaid Project IDE
+> **A battle-tested template for starting new AI-agent-optimized projects with comprehensive testing frameworks and clean architecture.**
 
-A lightweight, browser-based IDE for creating, organizing, and managing Mermaid diagrams within projects. It allows users to switch between Mermaid code and rendered diagram views, and persist models in IndexedDB.
+🎯 This repository serves as a **baseline template** for agentic development projects, featuring the MIT CSAIL **Concepts + Synchronizations** architecture pattern with complete testing infrastructure.
 
-This project is built using the **Concepts and Synchronizations** architecture, which promotes modular, testable, and maintainable code by separating application logic into independent "Concepts" and defining their interactions declaratively.
+## ⚡ Quick Start
 
-### Core Architecture
+### Clone This Template
 
-*   `/src/concepts`: Contains the core logic modules. Each concept manages its own state and is completely independent of the others.
-    *   `projectConcept.js`: Manages the list of projects and the currently selected project.
-    *   `diagramConcept.js`: Manages diagrams for the current project, including the active diagram's content.
-    *   `storageConcept.js`: Handles all interactions with the browser's IndexedDB for persistence.
-    *   `uiConcept.js`: Manages all direct DOM manipulations and UI state.
-*   `/src/synchronizations.js`: The "wiring" layer of the application. It listens for events from concepts and triggers actions in other concepts, defining all cross-concept interactions.
-*   `/unit-tests`: Contains unit and integration tests for the concepts and their synchronizations.
-*   `index.html`: The main HTML file and application entry point.
+```bash
+git clone -b template/agentic-project-baseline <your-repo-url> my-new-project
+cd my-new-project
+git checkout -b main  # Start fresh
+```
 
-### How to Use
+### Install and Run
 
-Because this application uses modern JavaScript Modules (`import`/`export`), it must be run from a local web server for security reasons. You cannot simply open `index.html` from your file system.
+```bash
+npm install
+npm test  # Run unit tests
+cd ui-test-framework && npm install && npm test  # Run UI tests
+```
 
-**Method 1: VS Code Live Server**
-1.  Open the project folder in Visual Studio Code.
-2.  Install the Live Server extension.
-3.  Right-click on `index.html` and select "Open with Live Server".
+## 📚 Documentation
 
-**Method 2: Command Line**
-1.  Make sure you have Node.js installed.
-2.  Open your terminal or command prompt in the project directory.
-3.  Run the command: `npx serve`
-4.  Open your browser and navigate to the local address provided by the command (usually `http://localhost:3000`).
+- **[TEMPLATE_README.md](./TEMPLATE_README.md)** - Complete template usage guide
+- **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - Architecture deep dive
+- **[testStrategy.md](./testStrategy.md)** - Testing philosophy
+- **[agenticDevlopment.md](./agenticDevlopment.md)** - AI-agent collaboration patterns
+- **[uiTestingFramework.md](./uiTestingFramework.md)** - UI testing specification
 
-### Features
+## 🏗️ What's Included
 
-*   **Project-Based Organization**: Group your diagrams into distinct projects for better management.
-*   **Side-Panel Navigation**: Quickly switch between diagrams within a project using a collapsible side menu with thumbnail previews.
-*   **Code Editor & Diagram Viewer**: A split-pane view to write Mermaid syntax and see the rendered diagram update in real-time.
-*   **Bulk Operations**:
-    *   **Upload**: Add multiple `.mmd` files to a project at once.
-    *   **Download**: Export an entire project as a `.zip` file containing all its diagrams.
-*   **Local Storage**: All projects and diagrams are saved securely in your browser's IndexedDB. No cloud account needed.
-*   **Individual File Management**:
-    *   Create, save, and delete individual diagrams.
-    *   Export a single diagram as a `.mmd` file.
+### Testing Frameworks
+
+✅ **Unit Testing** ([unit-tests/](./unit-tests/))
+- Process-level isolation for true test independence
+- Comprehensive test utilities with lifecycle hooks
+- JSON reporting and CI/CD integration
+- Example tests demonstrating best practices
+
+✅ **UI Testing** ([ui-test-framework/](./ui-test-framework/))
+- Lightweight CDP-based browser automation
+- Deterministic behavior with explicit waits
+- Structured trace logging for AI debugging
+- Complete CI/CD integration with GitHub Actions
+
+✅ **Shared Utilities** ([shared-test-utils/](./shared-test-utils/))
+- Common error types (AssertionError, TimeoutError, etc.)
+- Reusable testing utilities
+
+### Architecture
+
+✅ **Concepts + Synchronizations Pattern**
+- Modular, event-driven design
+- Singleton concepts with explicit state
+- Pure functions for testability
+- Clear separation of concerns
+
+✅ **Example Code**
+- [exampleConcept.js](./src/concepts/exampleConcept.js) - Sample concept implementation
+- [example.test.js](./unit-tests/example.test.js) - 25+ example unit tests
+- [example-ui.test.js](./ui-test-framework/tests/example-ui.test.js) - Browser automation examples
+
