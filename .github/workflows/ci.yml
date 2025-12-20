@@ -110,46 +110,28 @@ jobs:
           mkdir -p _site
 
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "📦 Deploying MAIN to root path"
+            echo "📦 Deploying MAIN gitDataPOC to root path"
 
-            # Check if build script exists, otherwise build manually
-            if npm run | grep -q "build"; then
-              npm run build
-            else
-              echo "Build script not found, building manually..."
-              mkdir -p dist && cp -r index.html styles src dist/
-            fi
-            cp -r dist/* _site/
+            # Deploy gitDataPOC app to root
+            cp -r gitDataPOC/* _site/
           else
             echo "📦 Deploying DEV to /dev/ path"
 
-            # Build main branch for root path
+            # Build main branch gitDataPOC for root path
             git fetch origin main
             git checkout origin/main
             npm install
 
-            # Check if build script exists on main, otherwise build manually
-            if npm run | grep -q "build"; then
-              npm run build
-            else
-              echo "Build script not found on main, building manually..."
-              mkdir -p dist && cp -r index.html styles src dist/
-            fi
-            cp -r dist/* _site/
+            echo "Deploying main gitDataPOC to root..."
+            cp -r gitDataPOC/* _site/
 
-            # Build dev branch for /dev/ path
+            # Build dev branch gitDataPOC for /dev/ path
             git checkout -
             npm install
 
-            # Check if build script exists on dev
-            if npm run | grep -q "build"; then
-              npm run build
-            else
-              echo "Build script not found on dev, building manually..."
-              mkdir -p dist && cp -r index.html styles src dist/
-            fi
+            echo "Deploying dev gitDataPOC to /dev/..."
             mkdir -p _site/dev
-            cp -r dist/* _site/dev/
+            cp -r gitDataPOC/* _site/dev/
 
             # Add base tag to dev index.html for proper path resolution
             # Extract repository name from GitHub context
@@ -188,7 +170,7 @@ jobs:
             </style>
           </head>
           <body>
-            <h1>🌐 Mermaid IDE Environments</h1>
+            <h1>🔐 GitData POC Environments</h1>
             <ul>
               <li>
                 <a href="/">
