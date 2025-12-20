@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Secure PWA (Multi-Git) PoC</title>
 
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0366d6">
+
+    <!-- Apple Touch Icon -->
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230366d6'/><text x='50' y='50' font-size='50' text-anchor='middle' dy='.3em' fill='white'>G</text></svg>">
+
     <link href="prism.css" rel="stylesheet" />
 
     <style>
@@ -919,6 +926,38 @@ function getLanguageClass(path) {
         
         // --- 10. START THE APP ---
         window.onload = main;
+
+        // --- 11. REGISTER SERVICE WORKER ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js', {
+                    scope: './'
+                })
+                .then(registration => {
+                    console.log('[PWA] Service Worker registered with scope:', registration.scope);
+
+                    // Handle updates
+                    registration.addEventListener('updatefound', () => {
+                        const newWorker = registration.installing;
+                        console.log('[PWA] New service worker found, installing...');
+
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('[PWA] New version available!');
+                                // Optional: Notify user of update
+                                if (confirm('New version available! Reload to update?')) {
+                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                    window.location.reload();
+                                }
+                            }
+                        });
+                    });
+                })
+                .catch(err => {
+                    console.error('[PWA] Service Worker registration failed:', err);
+                });
+            });
+        }
 </script>
 
 </body>
