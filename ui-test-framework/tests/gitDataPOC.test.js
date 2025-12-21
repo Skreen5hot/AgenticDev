@@ -24,20 +24,135 @@ const CHROME_PATH = process.env.CHROME_PATH ||
 const APP_PATH = path.resolve(__dirname, '../../gitDataPOC/index.html');
 const APP_URL = `file://${APP_PATH.replace(/\\/g, '/')}`;
 
+// Helper to ensure clean state before each test
+async function ensureCleanState() {
+  const oldPid = browserConcept.state.process?.pid;
+
+  try {
+    await browserConcept.actions.close();
+  } catch (err) {
+    // Ignore errors
+  }
+
+  // Reset state manually to be extra sure
+  browserConcept.state.browser = null;
+  browserConcept.state.wsEndpoint = null;
+  browserConcept.state.ws = null;
+  browserConcept.state.process = null;
+  browserConcept.state.cdpPort = null;
+  browserConcept.state.defaultPageTarget = null;
+  browserConcept.state.isClosing = false;
+  browserConcept.state.pendingMessages.clear();
+  browserConcept.state.sessions.clear();
+
+  // Wait for Chrome process to actually exit
+  if (oldPid) {
+    const maxWait = 5000; // 5 seconds max wait
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWait) {
+      try {
+        // On Windows, this throws if process doesn't exist
+        process.kill(oldPid, 0);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (err) {
+        // Process exited
+        break;
+      }
+    }
+  }
+}
+
 describe('gitDataPOC Application Tests', () => {
 
-  beforeEach(async () => {
-    await browserConcept.actions.launch({
-      executablePath: CHROME_PATH,
-      headless: true
+  // Tests that don't require browser
+  it('should validate repository path format', async () => {
+    // Test validation logic directly (without browser to avoid resource exhaustion)
+    const invalidPaths = ['owner', 'invalidpath', ''];
+
+    for (const testPath of invalidPaths) {
+      const parts = testPath.split('/');
+      const isValid = parts.length >= 2;
+
+      assert.strictEqual(
+        isValid,
+        false,
+        `Invalid path "${testPath}" should fail validation (has ${parts.length} parts, needs >= 2)`
+      );
+    }
+
+    // Also verify valid paths pass
+    const validPaths = ['owner/repo', 'group/project', 'org/sub/repo'];
+
+    for (const testPath of validPaths) {
+      const parts = testPath.split('/');
+      const isValid = parts.length >= 2;
+
+      assert.strictEqual(
+        isValid,
+        true,
+        `Valid path "${testPath}" should pass validation (has ${parts.length} parts)`
+      );
+    }
+  });
+
+  it('should have PWA features in HTML', async () => {
+    // Read the HTML file directly to verify PWA features without browser launch
+    const fs = await import('fs/promises');
+    const htmlContent = await fs.readFile(APP_PATH, 'utf-8');
+
+    // Check for service worker registration
+    assert.ok(
+      htmlContent.includes('serviceWorker.register') && htmlContent.includes('./service-worker.js'),
+      'App should have service worker registration code'
+    );
+
+    // Check for manifest link
+    assert.ok(
+      htmlContent.includes('rel="manifest"') && htmlContent.includes('manifest.json'),
+      'App should have manifest.json link'
+    );
+
+    // Check for theme color
+    assert.ok(
+      htmlContent.includes('name="theme-color"'),
+      'App should have theme-color meta tag'
+    );
+
+    // Check for updated placeholder text
+    assert.ok(
+      htmlContent.includes('owner/repo or https://github.com'),
+      'Placeholder should indicate both URL formats are accepted'
+    );
+
+    // Check for API URL construction logic
+    assert.ok(
+      htmlContent.includes('https://api.github.com') && htmlContent.includes('/api/v4/projects/'),
+      'App should have GitHub and GitLab API URL construction logic'
+    );
+
+    // Check for URL sanitization code
+    assert.ok(
+      htmlContent.includes('url.pathname.replace') && htmlContent.includes('.git'),
+      'App should have URL sanitization logic'
+    );
+  });
+
+  // Browser-based tests
+  describe('Browser Integration Tests', () => {
+    beforeEach(async () => {
+      await ensureCleanState();
+      await browserConcept.actions.launch({
+        executablePath: CHROME_PATH,
+        headless: true
+      });
     });
-  });
 
-  afterEach(async () => {
-    await browserConcept.actions.close();
-  });
+    afterEach(async () => {
+      await ensureCleanState();
+    });
 
-  it('should load the setup form on first visit', async () => {
+    it('should load the setup form on first visit', async () => {
     await browserConcept.actions.sendCDPCommand('Page.navigate', { url: APP_URL });
     await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -126,113 +241,5 @@ describe('gitDataPOC Application Tests', () => {
       );
     }
   });
-
-  it('should validate repository path format', async () => {
-    await browserConcept.actions.sendCDPCommand('Page.navigate', { url: APP_URL });
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Test validation by attempting to submit with invalid repo path
-    const validationTest = await browserConcept.actions.sendCDPCommand('Runtime.evaluate', {
-      expression: `JSON.stringify((function() {
-          const invalidPaths = ['owner', 'invalidpath', ''];
-          const results = [];
-
-          for (const path of invalidPaths) {
-            const parts = path.split('/');
-            results.push({
-              path: path,
-              valid: parts.length >= 2
-            });
-          }
-
-          return results;
-        })());
-      `,
-      returnByValue: true
-    });
-
-    const results = JSON.parse(validationTest.result.value);
-    for (const result of results) {
-      assert.strictEqual(
-        result.valid,
-        false,
-        `Invalid path "${result.path}" should fail validation`
-      );
-    }
-  });
-
-  it('should have service worker registration code', async () => {
-    await browserConcept.actions.sendCDPCommand('Page.navigate', { url: APP_URL });
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Check that service worker registration code exists
-    const hasServiceWorker = await browserConcept.actions.sendCDPCommand('Runtime.evaluate', {
-      expression: `
-        // Check if the script has service worker registration
-        const scriptContent = document.querySelector('script:not([src])').textContent;
-        scriptContent.includes('serviceWorker.register') &&
-        scriptContent.includes('./service-worker.js');
-      `
-    });
-
-    assert.strictEqual(
-      hasServiceWorker.result.value,
-      true,
-      'App should have service worker registration code'
-    );
-  });
-
-  it('should have PWA manifest link', async () => {
-    await browserConcept.actions.sendCDPCommand('Page.navigate', { url: APP_URL });
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const hasManifest = await browserConcept.actions.sendCDPCommand('Runtime.evaluate', {
-      expression: `
-        const manifestLink = document.querySelector('link[rel="manifest"]');
-        manifestLink && manifestLink.href.includes('manifest.json');
-      `
-    });
-
-    assert.strictEqual(
-      hasManifest.result.value,
-      true,
-      'App should have manifest.json link'
-    );
-  });
-
-  it('should have correct placeholder text for repository input', async () => {
-    await browserConcept.actions.sendCDPCommand('Page.navigate', { url: APP_URL });
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const placeholder = await browserConcept.actions.sendCDPCommand('Runtime.evaluate', {
-      expression: `document.getElementById('setup-repo').placeholder`
-    });
-
-    const placeholderText = placeholder.result.value;
-    assert.ok(
-      placeholderText.includes('owner/repo') || placeholderText.includes('github.com'),
-      `Placeholder should indicate both formats are accepted, got: "${placeholderText}"`
-    );
-  });
-
-  it('should detect GitHub and GitLab API base URLs correctly', async () => {
-    await browserConcept.actions.sendCDPCommand('Page.navigate', { url: APP_URL });
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Verify the API URL construction logic exists
-    const hasAPILogic = await browserConcept.actions.sendCDPCommand('Runtime.evaluate', {
-      expression: `
-        const scriptContent = document.querySelector('script:not([src])').textContent;
-        const hasGitHubAPI = scriptContent.includes('https://api.github.com');
-        const hasGitLabAPI = scriptContent.includes('/api/v4/projects/');
-        hasGitHubAPI && hasGitLabAPI;
-      `
-    });
-
-    assert.strictEqual(
-      hasAPILogic.result.value,
-      true,
-      'App should have GitHub and GitLab API URL construction logic'
-    );
   });
 });
