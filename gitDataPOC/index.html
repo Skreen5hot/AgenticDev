@@ -235,8 +235,8 @@
                     <input type="text" id="setup-gitlab-host" placeholder="https://gitlab.com">
                 </div>
 
-                <label for="setup-repo">Repository Path (e.g., owner/repo)</label>
-                <input type="text" id="setup-repo" placeholder="your-username/your-repo-name" required>
+                <label for="setup-repo">Repository (owner/repo or full URL)</label>
+                <input type="text" id="setup-repo" placeholder="owner/repo or https://github.com/owner/repo" required>
 
                 <label for="setup-token">Personal Access Token</label>
                 <input type="text" id="setup-token" placeholder="github_pat_... or glpat-..." required>
@@ -493,7 +493,7 @@
         document.getElementById('form-setup').onsubmit = async (e) => {
             e.preventDefault();
             const service = document.getElementById('setup-service').value;
-            const repoPath = document.getElementById('setup-repo').value;
+            let repoPath = document.getElementById('setup-repo').value.trim();
             const token = document.getElementById('setup-token').value;
             const password = document.getElementById('setup-password').value;
 
@@ -501,7 +501,23 @@
                 alert('Please fill out all fields.');
                 return;
             }
-            if (repoPath.split('/').length < 2) { 
+
+            // Sanitize repo path - extract owner/repo from full URLs
+            // Handles: https://github.com/owner/repo, https://gitlab.com/group/repo, owner/repo
+            try {
+                if (repoPath.startsWith('http://') || repoPath.startsWith('https://')) {
+                    const url = new URL(repoPath);
+                    // Extract path and remove leading/trailing slashes
+                    repoPath = url.pathname.replace(/^\/+|\/+$/g, '');
+                    // Remove .git suffix if present
+                    repoPath = repoPath.replace(/\.git$/, '');
+                }
+            } catch (urlError) {
+                alert('Invalid URL format. Please enter either "owner/repo" or a valid repository URL.');
+                return;
+            }
+
+            if (repoPath.split('/').length < 2) {
                  alert('Repo path must be in "owner/repo" or "group/repo" format.');
                  return;
             }
