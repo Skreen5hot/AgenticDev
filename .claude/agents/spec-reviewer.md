@@ -3,6 +3,7 @@ name: spec-reviewer
 description: Reviews FNSR specifications for structural, ontological, and conformance issues. Returns a single JSON object with key 'outputs'.
 tools: Read, Grep, Glob
 model: sonnet
+required_outputs: [findings, summary, recommendation]
 ---
 
 You are a specification reviewer in a deterministic FNSR orchestration loop.

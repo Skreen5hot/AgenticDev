@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -141,6 +142,38 @@ class ContainmentVeto(Exception):
     pass
 
 
+_REQUIRED_OUTPUTS_RE = re.compile(
+    r"^required_outputs:\s*\[(.*?)\]\s*$", re.MULTILINE
+)
+
+
+def _agent_required_outputs(agent_name: str) -> list[str]:
+    """
+    Read an agent's `required_outputs` from its frontmatter. Returns the
+    list of keys an agent's `outputs` dict MUST contain on success; empty
+    list if the agent has no declaration (or no .md file). Single-line
+    list syntax only: `required_outputs: [a, b, c]`.
+    """
+    agent_path = AGENTS_DIR / f"{agent_name}.md"
+    if not agent_path.exists():
+        return []
+    text = agent_path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        return []
+    end = text.find("---", 3)
+    if end < 0:
+        return []
+    frontmatter = text[3:end]
+    match = _REQUIRED_OUTPUTS_RE.search(frontmatter)
+    if not match:
+        return []
+    return [
+        s.strip().strip('"').strip("'")
+        for s in match.group(1).split(",")
+        if s.strip()
+    ]
+
+
 def cps_check(task: dict[str, Any], proposed_outputs: Any) -> None:
     if proposed_outputs is None:
         raise ContainmentVeto("null outputs not permitted")
@@ -150,6 +183,15 @@ def cps_check(task: dict[str, Any], proposed_outputs: Any) -> None:
             raise ContainmentVeto(
                 f"agent reported structured error: {err!r}"
             )
+        agent_name = task.get("agent")
+        if agent_name:
+            required = _agent_required_outputs(agent_name)
+            missing = [k for k in required if k not in proposed_outputs]
+            if missing:
+                raise ContainmentVeto(
+                    f"agent {agent_name!r} missing required output keys: "
+                    f"{missing}"
+                )
 
 
 def hiri_sign(prev_hash: str, payload: dict[str, Any]) -> str:
@@ -255,6 +297,145 @@ def invoke_subagent(agent_name: str, task: dict[str, Any],
                             "no JSON object found in stdout",
                             proc.stdout)
     return WorkerResult(True, outputs, proc.stderr, proc.stdout)
+
+
+# ---------- System agents (deterministic, local Python) -----------------
+
+def _apply_changes(task: dict[str, Any],
+                   upstream: dict[str, Any]) -> "WorkerResult":
+    """
+    Apply a `developer` agent's proposed changes to the filesystem.
+    Strict semantics: every change's `before` snippet must appear EXACTLY
+    once in its target file, otherwise the change is rejected (no
+    silent overwrite of drifted content). All-applied success returns
+    `{applied, failed: [], summary}`; any failure returns a structured
+    error which CPS will veto, leaving the task `blocked` for operator
+    inspection with the full applied/failed list preserved.
+
+    Inputs schema:
+      source_task : str   <- @id of an upstream task whose outputs
+                              contain a `changes[]` list (the developer
+                              agent's contract). MUST be present in
+                              `depends_on`; daemon-resolved upstream
+                              provides it via `upstream` dict.
+      apply_root  : str?  <- root directory for relative file paths
+                              (default ".").
+    """
+    log.info("dispatch task=%s system_agent=applier", task["@id"])
+    inputs = task.get("inputs") or {}
+    source_id = inputs.get("source_task")
+    apply_root = Path(inputs.get("apply_root", "."))
+
+    if not source_id:
+        return WorkerResult(True,
+                            {"error": "missing_source_task",
+                             "needed": ["inputs.source_task"]},
+                            "", "")
+
+    source = upstream.get(source_id)
+    if source is None:
+        return WorkerResult(True,
+                            {"error": "source_not_in_upstream",
+                             "source_task": source_id,
+                             "hint": "add the source task to depends_on"},
+                            "", "")
+    if not isinstance(source, dict):
+        return WorkerResult(True,
+                            {"error": "source_outputs_not_a_dict",
+                             "source_task": source_id},
+                            "", "")
+    changes = source.get("changes")
+    if not isinstance(changes, list):
+        return WorkerResult(True,
+                            {"error": "source_has_no_changes",
+                             "source_task": source_id},
+                            "", "")
+
+    applied: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    for change in changes:
+        if not isinstance(change, dict):
+            failed.append({"id": "?", "reason": "change_not_a_dict"})
+            continue
+        cid = change.get("id", "?")
+        file_rel = change.get("file")
+        before = change.get("before")
+        after = change.get("after")
+
+        if not file_rel or after is None:
+            failed.append({"id": cid, "reason": "missing_required_field",
+                           "needed": ["file", "after"]})
+            continue
+
+        file_path = apply_root / file_rel
+        try:
+            if before in (None, ""):
+                if file_path.exists():
+                    failed.append({"id": cid, "reason": "new_file_exists",
+                                   "path": str(file_path)})
+                    continue
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(after, encoding="utf-8")
+                applied.append({"id": cid, "path": str(file_path),
+                                "mode": "create",
+                                "bytes_written": len(after.encode("utf-8"))})
+            else:
+                if not file_path.exists():
+                    failed.append({"id": cid, "reason": "file_not_found",
+                                   "path": str(file_path)})
+                    continue
+                content = file_path.read_text(encoding="utf-8")
+                count = content.count(before)
+                if count == 0:
+                    failed.append({"id": cid, "reason": "before_not_found",
+                                   "path": str(file_path)})
+                    continue
+                if count > 1:
+                    failed.append({"id": cid, "reason": "before_not_unique",
+                                   "path": str(file_path), "count": count})
+                    continue
+                new_content = content.replace(before, after, 1)
+                file_path.write_text(new_content, encoding="utf-8")
+                applied.append({"id": cid, "path": str(file_path),
+                                "mode": "edit",
+                                "delta_bytes": (len(new_content.encode("utf-8"))
+                                                - len(content.encode("utf-8")))})
+        except OSError as e:
+            failed.append({"id": cid, "reason": "io_error", "error": str(e)})
+
+    if failed:
+        return WorkerResult(True,
+                            {"error": "apply_partial_failure",
+                             "applied": applied,
+                             "failed": failed,
+                             "summary": (f"{len(applied)} applied, "
+                                         f"{len(failed)} failed")},
+                            "", "")
+    return WorkerResult(True,
+                        {"applied": applied,
+                         "failed": [],
+                         "summary": f"{len(applied)} changes applied"},
+                        "", "")
+
+
+SYSTEM_AGENTS = {
+    "applier": _apply_changes,
+}
+
+
+def invoke_agent(agent_name: str, task: dict[str, Any],
+                 upstream: dict[str, Any]) -> "WorkerResult":
+    """
+    Dispatch entry point. Routes to a deterministic system-agent function
+    if one is registered for the given name; otherwise dispatches via
+    Claude Code subagent (LLM). This is the single seam between
+    orchestrator-internal automation and external reasoning.
+    """
+    handler = SYSTEM_AGENTS.get(agent_name)
+    if handler is not None:
+        return handler(task, upstream)
+    return invoke_subagent(agent_name, task, upstream)
 
 
 def _build_prompt(task: dict[str, Any], upstream: dict[str, Any]) -> str:
@@ -366,7 +547,7 @@ def run_one_cycle() -> bool:
         snapshot = json.loads(json.dumps(task))
         upstream = _resolve_upstream(state, task)
 
-    result = invoke_subagent(agent_name, snapshot, upstream)
+    result = invoke_agent(agent_name, snapshot, upstream)
 
     with locked_state() as state:
         live = _find_task(state, snapshot["@id"])

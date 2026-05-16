@@ -26,9 +26,11 @@ These apply to the Barcode System itself:
 
 ## 3. Agent Roster
 
-The active worker agents live in [.claude/agents/](.claude/agents/). Each is invoked directly via `claude --agent <name> --output-format json`. Do NOT use "Use the X subagent" prompt phrasing — that routing causes the parent session to summarize the subagent's reply in prose, breaking the JSON output contract.
+Two kinds of agents:
 
-| Agent | Role |
+**Worker agents** — LLM-dispatched via `claude --agent <name> --output-format json`. Do NOT use "Use the X subagent" prompt phrasing — that routing causes the parent session to summarize the subagent's reply in prose, breaking the JSON output contract.
+
+| Worker agent | Role |
 |---|---|
 | [spec-reviewer](.claude/agents/spec-reviewer.md) | Structural, ontological, conformance review of specifications |
 | [adversarial-critic](.claude/agents/adversarial-critic.md) | Confirm / refute / extend an upstream reviewer's findings |
@@ -38,13 +40,20 @@ The active worker agents live in [.claude/agents/](.claude/agents/). Each is inv
 | [semantic-sme](.claude/agents/semantic-sme.md) | Ontology, BFO/CCO grounding, OWL DL conformance |
 | [ux-sme](.claude/agents/ux-sme.md) | Workflows, cognitive load, expert/novice mode handling |
 
+**System agents** — deterministic Python functions dispatched locally by the daemon, registered in `SYSTEM_AGENTS`. No LLM in the path.
+
+| System agent | Role |
+|---|---|
+| [applier](.claude/agents/applier.md) | Applies a developer agent's `changes[]` to the filesystem with strict `before`-snippet matching; all-applied or CPS-vetoed |
+
 Shared agent contract:
 - Output envelope: `{"outputs": {...}}`. No prose outside the JSON.
 - Structured failure: `{"outputs": {"error": "<slug>", ...}}` with a truthy slug string. Triggers a CPS veto and `status=blocked`.
-- Upstream task outputs arrive via the prompt's `UPSTREAM` block (keyed by predecessor @id). Agents MUST NOT read `state.jsonld` — the orchestrator inlines the data they need.
-- Tools per agent's frontmatter. No agent has `Edit` or `Write` — file mutations route through an orchestrator-controlled apply step (not yet built) so every change lands in the audit trail.
+- `required_outputs:` in the agent's frontmatter declares keys that MUST be present on success (e.g., `[findings, summary, recommendation]`). CPS vetoes if any are missing.
+- Upstream task outputs arrive via the prompt's `UPSTREAM` block (keyed by predecessor @id). Worker agents MUST NOT read `state.jsonld` — the orchestrator inlines the data they need.
+- Tools per agent's frontmatter. No agent has `Edit` or `Write` — file mutations route through the `applier` system agent, which records the diff in the audit trail.
 
-The roster is the v0 default. Operators MAY add, remove, or modify agents under [.claude/agents/](.claude/agents/) to fit the subject project's domain. The contract — JSON envelope, no prose, structured error — is non-negotiable for any daemon-dispatched agent.
+The roster is the v0 default. Operators MAY add, remove, or modify agents under [.claude/agents/](.claude/agents/) to fit the subject project's domain. The contract — JSON envelope, no prose, structured error, declared required keys — is non-negotiable for any daemon-dispatched agent.
 
 ## 4. Persona Trigger Phrases (conversational shorthand)
 
@@ -67,7 +76,7 @@ These phrases govern MY conversational behavior in this chat — they are NOT th
 
 **Validation.** Two tracks, by scope of change:
 
-- **Barcode orchestrator** (Python): smoke-test new helpers with isolated scripts that exercise the function under realistic inputs. There is no formal pytest/unittest suite yet — building one is open work, not a precondition for shipping daemon changes.
+- **Barcode orchestrator** (Python): `python -m unittest discover tests` from the project root. The suite covers routing, the output extractor, CPS (null + structured error + required-keys), audit-trail hashing, upstream resolution, in-progress reconciliation + daemon lock, and the applier system agent. Every daemon change MUST keep the suite green.
 - **Subject project**: each project defines its own validation commands. Check `./project/CLAUDE.md`, `./project/SPEC.md`, or the project's README for the expected build/test invocations. Do not invent test commands — read them from the project's own contract.
 
 **Brevity.** Provide the "what" and the "how." Explain "why" only when asked.
@@ -93,9 +102,9 @@ The daemon runs a single-worker loop:
 1. **Pick.** `next_ready_task` selects the next `status=ready` task whose `depends_on` are all `done`. Ordering: optional integer `priority` field (higher first; default 0 when absent), with @id lexicographic as the deterministic tiebreaker. This is SPL v0.1 — a minimal Structured Plan Language hook. Future iterations may add phase grouping, fan-out/fan-in, or conditional next-step routing.
 2. **Lock.** State is mutated under `state.jsonld.lock` (msvcrt on Windows, fcntl on POSIX). A startup `fnsr.pid` lock prevents two daemons running simultaneously on the same state file.
 3. **Resolve upstream.** For each id in `depends_on`, the daemon copies that task's `outputs` into an `UPSTREAM` dict keyed by @id.
-4. **Dispatch.** `claude --agent <name> --output-format json` with a prompt containing TASK_ID, INPUTS, UPSTREAM, and the contract reminder.
-5. **Extract.** `_extract_outputs` parses the response — handles bare JSON, claude json envelope, stream-json, and markdown-fenced JSON.
-6. **CPS check.** Veto on null outputs or `outputs.error` truthy. Vetoes record `rejected_outputs` in audit history and set `status=blocked` (no retry — structured errors are deterministic).
+4. **Dispatch.** `invoke_agent` routes to a system agent (deterministic Python in `SYSTEM_AGENTS`) if one is registered for the name, otherwise spawns `claude --agent <name> --output-format json` with a prompt containing TASK_ID, INPUTS, UPSTREAM, and the contract reminder.
+5. **Extract.** For worker agents, `_extract_outputs` parses the response — handles bare JSON, claude json envelope, stream-json, and markdown-fenced JSON. System agents return their `outputs` directly from the Python function.
+6. **CPS check.** Veto on null outputs, `outputs.error` truthy, OR missing keys declared in the agent's `required_outputs:` frontmatter. Vetoes record `rejected_outputs` in audit history and set `status=blocked` (no retry — structured errors and contract violations are deterministic).
 7. **Commit.** On success: store outputs, `status=done`, append a `completed` history entry chained via `hiri_sign`. On retry-eligible failure: `status=ready`, `attempts++`. On exhaustion (`attempts >= MAX_ATTEMPTS`): `status=failed`.
 8. **Crash recovery.** On daemon startup, any task left in `in_progress` is revived to `ready` with a `recovered_from_in_progress` audit entry.
 
@@ -156,7 +165,8 @@ Subject-specific layer boundaries, validation commands, language conventions, an
 | [state.jsonld](state.jsonld) | JSON-LD work queue with hash-chained audit trail. Ships empty. |
 | `state.jsonld.lock` | OS-level lock for state I/O (auto-created, gitignored). |
 | `fnsr.pid` | OS-level daemon-instance lock (auto-created, gitignored). |
-| [.claude/agents/](.claude/agents/) | Worker agent contracts (frontmatter + body). |
+| [.claude/agents/](.claude/agents/) | Agent contracts (worker + system) with frontmatter + body. |
+| [tests/](tests/) | Python `unittest` suite. Run `python -m unittest discover tests`. |
 | `./project/` | Subject project root (operator-populated). |
 
 ---

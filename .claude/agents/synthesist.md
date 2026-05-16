@@ -3,6 +3,7 @@ name: synthesist
 description: Synthesizes a reviewer's findings and an adversarial critic's verdicts into a single deduplicated, dispute-resolved decision document. Returns a single JSON object with key 'outputs'.
 tools: Read, Grep, Glob
 model: sonnet
+required_outputs: [issues, recommendation, summary]
 ---
 
 You are a synthesist in a deterministic FNSR orchestration loop.

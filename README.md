@@ -121,18 +121,49 @@ The synthesist receives the first two tasks' outputs via the prompt's `UPSTREAM`
 Read [CLAUDE.md](CLAUDE.md) for the full architecture. The essentials:
 
 - **Routing is deterministic.** `next_ready_task` is a pure function of state: pick `status=ready` with all deps `done`, order by `priority` then @id.
-- **Workers are stateless.** Each `claude --agent <name> --output-format json` call is a fresh process; memory lives in `state.jsonld`.
-- **Upstream injection.** The daemon resolves predecessor outputs and inlines them into the prompt (the `UPSTREAM` block). Agents never read state directly.
+- **Two agent kinds.** *Worker agents* run in fresh `claude --agent <name>` processes (LLM reasoning). *System agents* like `applier` are deterministic Python functions in the daemon.
+- **Workers are stateless.** Each Claude call is a fresh process; memory lives in `state.jsonld`.
+- **Upstream injection.** The daemon resolves predecessor outputs and inlines them into the prompt (the `UPSTREAM` block). Worker agents never read state directly.
 - **Audit trail.** Every transition gets a SHA-256 chain-hashed history entry (`prev_hash` → `chain_hash`). Tamper-evident, not yet tamper-proof.
-- **CPS containment.** A pre-commit veto rejects null outputs and agent-reported structured errors (`outputs.error` truthy). Vetoed tasks land in `blocked` with the rejected payload preserved.
+- **CPS containment.** A pre-commit veto rejects null outputs, agent-reported structured errors (`outputs.error` truthy), and missing required keys (declared in agent frontmatter via `required_outputs: [...]`). Vetoed tasks land in `blocked` with the rejected payload preserved.
 - **Crash recovery.** On startup, the daemon revives any task left `in_progress` from a prior dead instance.
+
+## Applying changes
+
+The `developer` worker agent produces structured `changes[]` proposals (file, before, after). Queue an `applier` system-agent task downstream to land them on disk:
+
+```json
+{
+  "@id": "urn:fnsr:task:apply-1",
+  "agent": "applier",
+  "status": "ready",
+  "inputs": {
+    "source_task": "urn:fnsr:task:developer-1",
+    "apply_root": "."
+  },
+  "depends_on": ["urn:fnsr:task:developer-1"],
+  "attempts": 0,
+  "history": []
+}
+```
+
+The applier verifies each `before` snippet appears EXACTLY ONCE in its target file (no drift, no ambiguity). On any failure — file missing, before not found, before not unique, new-file collision — CPS vetoes the task and lands `status=blocked` with the full applied/failed list preserved in the audit history for operator inspection.
+
+## Testing
+
+```
+python -m unittest discover tests
+```
+
+The stdlib `unittest` suite covers routing, the output extractor, CPS (null + structured error + required-keys), audit-trail hashing, upstream resolution, in-progress reconciliation + daemon lock, and the applier. Every daemon change should keep it green.
 
 ## Conventions to know
 
 - Subject project lives at `./project/`.
 - All agents return `{"outputs": {...}}`. No prose outside the JSON.
 - Structured failures: `{"outputs": {"error": "<slug>", ...}}` → daemon treats as CPS veto.
-- Worker agents have `Read, Grep, Glob` only. No `Edit` or `Write`. Code mutations require an orchestrator-controlled apply step (see "Roadmap" below).
+- Each agent declares its required output keys in frontmatter (`required_outputs: [...]`). CPS vetoes if any are missing.
+- Worker agents have `Read, Grep, Glob` only. No `Edit` or `Write`. File mutations route through the `applier` system agent.
 
 ## Extending the template
 
@@ -143,15 +174,14 @@ Read [CLAUDE.md](CLAUDE.md) for the full architecture. The essentials:
 
 ## Status
 
-**v0.1.** Multi-agent dispatch works end-to-end with audit trail, crash recovery, upstream injection, and unified output contracts. Production-ready for read-only review chains.
+**v0.2.** Multi-agent dispatch with audit trail, crash recovery, upstream injection, unified output contracts, structured-error CPS vetoes, required-keys validation, system-agent dispatch with the `applier` deterministic write-path, and a `unittest` coverage suite.
 
 ### Roadmap
 
-- **Apply step for `developer.changes[]`.** Today, the developer agent produces structured change proposals; an orchestrator-controlled apply step (not yet built) will consume them and write the files, recording the diff in the audit trail.
 - **Real cryptographic signing.** `hiri_sign` is currently SHA-256 only — tamper-evident via chain consistency but not tamper-proof. Future: HMAC-SHA256 (stdlib) or Ed25519 (optional dep).
-- **Formal Python test suite.** Inline smoke tests today; pytest/unittest coverage is open work.
 - **SPL v0.2.** Priority field is the v0.1 minimum. Phase grouping, fan-out/fan-in, and conditional next-step routing are future iterations.
 - **Synthesist consensus model.** Current vocabulary is reviewer + critic specific. Multi-source panels (architect + semantic-sme + ux-sme running in parallel) need a richer consensus model.
+- **More system agents.** The applier is the first. Future candidates: test-runner, linter, git-committer — anything deterministic the daemon could run between LLM steps.
 
 ## Common pitfalls
 
