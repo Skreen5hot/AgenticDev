@@ -96,9 +96,26 @@ def locked_state() -> Iterator[dict[str, Any]]:
 
 
 def _atomic_write(path: Path, content: str) -> None:
+    """
+    Write content to a temp sibling and atomically rename into place.
+    On Windows, transient locks (OneDrive sync, antivirus, Search indexer)
+    can cause PermissionError on os.replace even though no other daemon
+    holds the file. Retry with a short exponential backoff before giving
+    up — total wait under 5 seconds across 6 attempts.
+    """
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    delays = [0.0, 0.05, 0.15, 0.4, 1.0, 2.5]
+    last_err: Optional[Exception] = None
+    for delay in delays:
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as e:
+            last_err = e
+    raise last_err if last_err else RuntimeError("atomic_write failed")
 
 
 def _empty_state() -> dict[str, Any]:
