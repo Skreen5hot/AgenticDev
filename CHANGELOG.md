@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.3.1 — Applier writes UTF-8 BOM on new files
+
+Patch release. The applier now prepends a UTF-8 BOM (`EF BB BF`) when creating new files unless the content already starts with one. This forces Claude Code's `Read` tool to decode the file as UTF-8 on subsequent agent reads, instead of defaulting to cp1252 on Windows — which silently produced mojibake (e.g., `§` rendered as `Â§`) and broke downstream `before`-match in apply tasks.
+
+### Discovery context
+v2.2/v2.3 kickoff produced an `IMPLEMENTATION_PLAN.md` with 190 mojibake `Â§` characters (plus 190 correctly-encoded `§`). The cause: the applier wrote the file BOM-less in task 002 (and again in 009), so Claude's Read tool decoded those files as cp1252 when downstream agents (developer, planner) read them. Even after manually BOM'ing project files, any file the applier CREATED inherited the bug.
+
+### Changed
+- `_apply_changes` new-file branch prepends `﻿` (UTF-8 BOM character) unless content already starts with one. Reflected in the applier's `bom_prepended` flag in the applied entry.
+- Edit-mode writes preserve whatever BOM state existed (no change in behavior).
+- Two new tests: BOM presence on create; no double-BOM if content already has one.
+
+### Migration notes
+Operators with existing BOM-less project files should manually add BOM (e.g., `Set-Content -Encoding UTF8BOM file.md` on Windows or `sed -i '1s/^/\xef\xbb\xbf/' file.md` on POSIX). Files the applier creates from this version onward will have BOM automatically. Edit-mode writes don't retroactively add BOM to existing files.
+
+### Known limitation
+LLM-side encoding inconsistency can still produce mojibake in agent OUTPUTS (not file reads). Observed in the v2.3.0 kickoff: the planner's IMPLEMENTATION_PLAN.md output contained both `§` and `Â§` for the same section-reference pattern, suggesting stochastic encoding in the model's generation. Mitigation: operators can post-process planner outputs with mojibake regex replacement before applying (see project/IMPLEMENTATION_PLAN.md repair pattern in the GraphWrite kickoff run).
+
 ## v2.3.0 — Multi-change atomic apply
 
 The applier now handles multiple edits to the same file correctly. Each change's `before` is located in the ORIGINAL file content (not the in-progress intermediate state), overlapping changes are detected and rejected, and non-overlapping changes are applied end-to-start in a single pass so earlier positions don't shift.

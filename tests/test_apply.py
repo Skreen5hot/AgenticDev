@@ -44,7 +44,30 @@ class TestApplyChanges(unittest.TestCase):
              "before": None, "after": "# Hello"}
         ]))
         self.assertNotIn("error", r.outputs)
-        self.assertEqual((self.tmpdir / "new.md").read_text(), "# Hello")
+        # utf-8-sig strips the BOM the applier prepends.
+        self.assertEqual(
+            (self.tmpdir / "new.md").read_text(encoding="utf-8-sig"),
+            "# Hello"
+        )
+
+    def test_new_file_writes_utf8_bom(self):
+        d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "new.md",
+             "before": None, "after": "# Hello"}
+        ]))
+        raw = (self.tmpdir / "new.md").read_bytes()
+        # UTF-8 BOM is 0xEF 0xBB 0xBF.
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+
+    def test_new_file_doesnt_double_bom(self):
+        d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "new.md",
+             "before": None, "after": "﻿# Already has BOM"}
+        ]))
+        raw = (self.tmpdir / "new.md").read_bytes()
+        # Exactly one BOM at start.
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertNotIn(b"\xef\xbb\xbf", raw[3:])
 
     def test_new_file_in_subdir_creates_parent(self):
         r = d._apply_changes(self._task(), self._upstream([
@@ -53,7 +76,9 @@ class TestApplyChanges(unittest.TestCase):
         ]))
         self.assertNotIn("error", r.outputs)
         self.assertEqual(
-            (self.tmpdir / "deep" / "nested" / "path.txt").read_text(), "x"
+            (self.tmpdir / "deep" / "nested" / "path.txt").read_text(
+                encoding="utf-8-sig"),
+            "x"
         )
 
     def test_before_not_unique_fails_without_writing(self):
@@ -222,9 +247,15 @@ class TestMultiChangeAtomicApply(unittest.TestCase):
              "after": "freshly created"},
         ]))
         self.assertNotIn("error", r.outputs)
-        self.assertEqual((self.tmpdir / "a.txt").read_text(), "MODIFIED\n")
-        self.assertEqual((self.tmpdir / "new.txt").read_text(),
-                         "freshly created")
+        # Edit mode doesn't add BOM; create mode does — utf-8-sig handles both.
+        self.assertEqual(
+            (self.tmpdir / "a.txt").read_text(encoding="utf-8-sig"),
+            "MODIFIED\n"
+        )
+        self.assertEqual(
+            (self.tmpdir / "new.txt").read_text(encoding="utf-8-sig"),
+            "freshly created"
+        )
 
     def test_position_preservation_under_end_to_start(self):
         """Apply order MUST be end-to-start so earlier positions don't

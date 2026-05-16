@@ -415,18 +415,23 @@ def _apply_changes(task: dict[str, Any],
         else:
             edits_by_file.setdefault(file_rel, []).append((cid, before, after))
 
-    # Process new-file creates.
+    # Process new-file creates. Prepend a UTF-8 BOM if the content doesn't
+    # already have one — Claude Code's Read tool on Windows otherwise defaults
+    # to cp1252 decoding for BOM-less UTF-8 files, producing mojibake (e.g.,
+    # `§` rendered as `Â§`) on subsequent reads by downstream agents.
     for cid, file_rel, after in new_files:
         file_path = apply_root / file_rel
         if file_path.exists():
             failed.append({"id": cid, "reason": "new_file_exists",
                            "path": str(file_path)})
             continue
+        content_to_write = after if after.startswith("﻿") else "﻿" + after
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(after, encoding="utf-8")
+            file_path.write_text(content_to_write, encoding="utf-8")
             applied.append({"id": cid, "path": str(file_path), "mode": "create",
-                            "bytes_written": len(after.encode("utf-8"))})
+                            "bytes_written": len(content_to_write.encode("utf-8")),
+                            "bom_prepended": not after.startswith("﻿")})
         except OSError as e:
             failed.append({"id": cid, "reason": "io_error", "error": str(e)})
 
