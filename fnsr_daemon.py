@@ -262,12 +262,18 @@ def _resolve_upstream(state: dict[str, Any], task: dict[str, Any]) -> dict[str, 
     return out
 
 
-def _resolve_claude_command(prompt: str, agent_name: str) -> Optional[list[str]]:
+def _resolve_claude_command(agent_name: str) -> Optional[list[str]]:
+    """
+    Build the claude invocation. The prompt is NOT included on the command
+    line — it's piped via stdin in invoke_subagent. This avoids Windows's
+    8191-character cmd.exe argument limit, which trivially breaks when
+    UPSTREAM blocks carry a few KB of prior task outputs.
+    """
     claude_exe = shutil.which(CLAUDE_BIN)
     if claude_exe is None:
         return None
     base_args = [
-        "-p", prompt,
+        "-p",
         "--agent", agent_name,
         "--output-format", "json",
     ]
@@ -279,7 +285,7 @@ def _resolve_claude_command(prompt: str, agent_name: str) -> Optional[list[str]]
 def invoke_subagent(agent_name: str, task: dict[str, Any],
                     upstream: dict[str, Any]) -> WorkerResult:
     prompt = _build_prompt(task, upstream)
-    cmd = _resolve_claude_command(prompt, agent_name)
+    cmd = _resolve_claude_command(agent_name)
     if cmd is None:
         return WorkerResult(False, None,
                             f"could not find '{CLAUDE_BIN}' on PATH", "")
@@ -288,6 +294,7 @@ def invoke_subagent(agent_name: str, task: dict[str, Any],
     try:
         proc = subprocess.run(
             cmd,
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=TASK_TIMEOUT_S,
