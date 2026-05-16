@@ -1,0 +1,5 @@
+{
+  "@context": "https://fnsr.example/context.jsonld",
+  "@id": "urn:fnsr:run:bootstrap",
+  "tasks": []
+}
