@@ -329,12 +329,27 @@ def _apply_changes(task: dict[str, Any],
                    upstream: dict[str, Any]) -> "WorkerResult":
     """
     Apply a `developer` agent's proposed changes to the filesystem.
-    Strict semantics: every change's `before` snippet must appear EXACTLY
-    once in its target file, otherwise the change is rejected (no
-    silent overwrite of drifted content). All-applied success returns
-    `{applied, failed: [], summary}`; any failure returns a structured
-    error which CPS will veto, leaving the task `blocked` for operator
-    inspection with the full applied/failed list preserved.
+
+    Multi-change atomic semantics: when several edits target the same
+    file, the applier finds each `before` snippet's position in the
+    ORIGINAL file (not the intermediate state), checks for overlap, and
+    applies all non-overlapping edits in a single end-to-start pass.
+    This avoids the cascade failure mode where applying change C1 mutates
+    the file and breaks C2's `before` match.
+
+    Per-change rejection (recorded in `failed` list, doesn't block other
+    changes):
+      - `before_not_found`   — snippet not in original
+      - `before_not_unique`  — snippet appears multiple times in original
+      - `overlaps_other_change` — change's region intersects another's
+      - `file_not_found`     — edit target missing
+      - `new_file_exists`    — create target already exists
+      - `missing_required_field` — file or after absent
+      - `io_error` / `io_error_on_write`
+
+    All-applied success returns `{applied, failed: [], summary}`; any
+    failure returns a structured error which CPS will veto, leaving the
+    task `blocked` for operator inspection with full applied/failed lists.
 
     Inputs schema:
       source_task : str   <- @id of an upstream task whose outputs
@@ -378,6 +393,9 @@ def _apply_changes(task: dict[str, Any],
     applied: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
 
+    # Classify changes into new-files (before is null/empty) and edits.
+    new_files: list[tuple[str, str, str]] = []
+    edits_by_file: dict[str, list[tuple[str, str, str]]] = {}
     for change in changes:
         if not isinstance(change, dict):
             failed.append({"id": "?", "reason": "change_not_a_dict"})
@@ -392,41 +410,89 @@ def _apply_changes(task: dict[str, Any],
                            "needed": ["file", "after"]})
             continue
 
+        if before in (None, ""):
+            new_files.append((cid, file_rel, after))
+        else:
+            edits_by_file.setdefault(file_rel, []).append((cid, before, after))
+
+    # Process new-file creates.
+    for cid, file_rel, after in new_files:
         file_path = apply_root / file_rel
+        if file_path.exists():
+            failed.append({"id": cid, "reason": "new_file_exists",
+                           "path": str(file_path)})
+            continue
         try:
-            if before in (None, ""):
-                if file_path.exists():
-                    failed.append({"id": cid, "reason": "new_file_exists",
-                                   "path": str(file_path)})
-                    continue
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                file_path.write_text(after, encoding="utf-8")
-                applied.append({"id": cid, "path": str(file_path),
-                                "mode": "create",
-                                "bytes_written": len(after.encode("utf-8"))})
-            else:
-                if not file_path.exists():
-                    failed.append({"id": cid, "reason": "file_not_found",
-                                   "path": str(file_path)})
-                    continue
-                content = file_path.read_text(encoding="utf-8")
-                count = content.count(before)
-                if count == 0:
-                    failed.append({"id": cid, "reason": "before_not_found",
-                                   "path": str(file_path)})
-                    continue
-                if count > 1:
-                    failed.append({"id": cid, "reason": "before_not_unique",
-                                   "path": str(file_path), "count": count})
-                    continue
-                new_content = content.replace(before, after, 1)
-                file_path.write_text(new_content, encoding="utf-8")
-                applied.append({"id": cid, "path": str(file_path),
-                                "mode": "edit",
-                                "delta_bytes": (len(new_content.encode("utf-8"))
-                                                - len(content.encode("utf-8")))})
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(after, encoding="utf-8")
+            applied.append({"id": cid, "path": str(file_path), "mode": "create",
+                            "bytes_written": len(after.encode("utf-8"))})
         except OSError as e:
             failed.append({"id": cid, "reason": "io_error", "error": str(e)})
+
+    # Process edits per file, applying all non-overlapping in one pass.
+    for file_rel, edits in edits_by_file.items():
+        file_path = apply_root / file_rel
+        if not file_path.exists():
+            for cid, _, _ in edits:
+                failed.append({"id": cid, "reason": "file_not_found",
+                               "path": str(file_path)})
+            continue
+
+        try:
+            original = file_path.read_text(encoding="utf-8")
+        except OSError as e:
+            for cid, _, _ in edits:
+                failed.append({"id": cid, "reason": "io_error", "error": str(e)})
+            continue
+
+        # Locate each edit's region in the ORIGINAL content.
+        positions: list[tuple[int, int, str, str]] = []  # (pos, len, cid, after)
+        for cid, before, after in edits:
+            count = original.count(before)
+            if count == 0:
+                failed.append({"id": cid, "reason": "before_not_found",
+                               "path": str(file_path)})
+                continue
+            if count > 1:
+                failed.append({"id": cid, "reason": "before_not_unique",
+                               "path": str(file_path), "count": count})
+                continue
+            pos = original.find(before)
+            positions.append((pos, len(before), cid, after))
+
+        # Greedy overlap rejection: sort by start position; keep an edit
+        # only if it starts at or after the previously-kept edit's end.
+        positions.sort(key=lambda x: x[0])
+        keep: list[tuple[int, int, str, str]] = []
+        last_end = -1
+        for pos, length, cid, after in positions:
+            if pos < last_end:
+                failed.append({"id": cid, "reason": "overlaps_other_change",
+                               "path": str(file_path)})
+            else:
+                keep.append((pos, length, cid, after))
+                last_end = pos + length
+
+        if not keep:
+            continue
+
+        # Apply kept edits end-to-start so earlier positions don't shift.
+        new_content = original
+        for pos, length, cid, after in sorted(keep, key=lambda x: -x[0]):
+            new_content = new_content[:pos] + after + new_content[pos + length:]
+
+        try:
+            file_path.write_text(new_content, encoding="utf-8")
+            for pos, length, cid, after in keep:
+                applied.append({
+                    "id": cid, "path": str(file_path), "mode": "edit",
+                    "delta_bytes": len(after.encode("utf-8")) - length,
+                })
+        except OSError as e:
+            for pos, length, cid, after in keep:
+                failed.append({"id": cid, "reason": "io_error_on_write",
+                               "path": str(file_path), "error": str(e)})
 
     if failed:
         return WorkerResult(True,

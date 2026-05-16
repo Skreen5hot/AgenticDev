@@ -134,6 +134,113 @@ class TestApplyChanges(unittest.TestCase):
         self.assertEqual(r.outputs["error"], "source_has_no_changes")
 
 
+class TestMultiChangeAtomicApply(unittest.TestCase):
+    """v2.3.0: multiple edits to the same file no longer cascade-fail.
+    Each `before` is matched against the ORIGINAL file content; all
+    non-overlapping edits land in one pass."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="fnsr-multi-test-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _task(self, source_id="urn:t:dev"):
+        return {
+            "@id": "urn:t:apply",
+            "agent": "applier",
+            "inputs": {"source_task": source_id,
+                       "apply_root": str(self.tmpdir)},
+        }
+
+    def _upstream(self, changes, source_id="urn:t:dev"):
+        return {source_id: {"changes": changes}}
+
+    def test_three_non_overlapping_edits_all_apply(self):
+        (self.tmpdir / "a.txt").write_text("alpha\nbeta\ngamma\n")
+        r = d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "a.txt", "before": "alpha", "after": "ALPHA"},
+            {"id": "C2", "file": "a.txt", "before": "beta", "after": "BETA"},
+            {"id": "C3", "file": "a.txt", "before": "gamma", "after": "GAMMA"},
+        ]))
+        self.assertNotIn("error", r.outputs)
+        self.assertEqual((self.tmpdir / "a.txt").read_text(),
+                         "ALPHA\nBETA\nGAMMA\n")
+
+    def test_cascade_case_survives(self):
+        """The bug that motivated v2.3.0: change C1's `after` contains
+        text resembling C2's `before`. Pre-fix, C2's before was looked up
+        in the post-C1 file and might fail. Post-fix, both are located in
+        the ORIGINAL and applied end-to-start."""
+        (self.tmpdir / "a.txt").write_text("foo\nbar\n")
+        r = d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "a.txt", "before": "foo", "after": "bar"},
+            {"id": "C2", "file": "a.txt", "before": "bar\n", "after": "BAR\n"},
+        ]))
+        self.assertNotIn("error", r.outputs)
+        # C2 found 'bar\n' at original position 4-7 (the original 'bar\n').
+        # C1 replaced 'foo' (pos 0-2) with 'bar'. End-to-start: C2 first
+        # then C1 -> 'foo\nBAR\n' -> 'bar\nBAR\n'.
+        self.assertEqual((self.tmpdir / "a.txt").read_text(), "bar\nBAR\n")
+
+    def test_overlapping_edits_one_rejected(self):
+        (self.tmpdir / "a.txt").write_text("hello world\n")
+        r = d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "a.txt", "before": "hello world",
+             "after": "GREETING"},
+            {"id": "C2", "file": "a.txt", "before": "lo wor",
+             "after": "LO WOR"},
+        ]))
+        # Both `before` snippets appear once. They overlap on positions
+        # 3-9. Greedy: C1 starts earliest (pos 0), kept. C2 starts at
+        # pos 3 (< C1's end at 11), rejected as overlap.
+        self.assertEqual(r.outputs.get("error"), "apply_partial_failure")
+        applied_ids = {a["id"] for a in r.outputs["applied"]}
+        failed_reasons = {f["id"]: f["reason"] for f in r.outputs["failed"]}
+        self.assertEqual(applied_ids, {"C1"})
+        self.assertEqual(failed_reasons.get("C2"), "overlaps_other_change")
+        # C1 must have actually been written.
+        self.assertEqual((self.tmpdir / "a.txt").read_text(), "GREETING\n")
+
+    def test_edits_to_different_files_independent(self):
+        (self.tmpdir / "a.txt").write_text("aaa")
+        (self.tmpdir / "b.txt").write_text("bbb")
+        r = d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "a.txt", "before": "aaa", "after": "AAA"},
+            {"id": "C2", "file": "b.txt", "before": "bbb", "after": "BBB"},
+        ]))
+        self.assertNotIn("error", r.outputs)
+        self.assertEqual((self.tmpdir / "a.txt").read_text(), "AAA")
+        self.assertEqual((self.tmpdir / "b.txt").read_text(), "BBB")
+
+    def test_mix_of_create_and_edit(self):
+        (self.tmpdir / "a.txt").write_text("existing\n")
+        r = d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "a.txt", "before": "existing",
+             "after": "MODIFIED"},
+            {"id": "C2", "file": "new.txt", "before": None,
+             "after": "freshly created"},
+        ]))
+        self.assertNotIn("error", r.outputs)
+        self.assertEqual((self.tmpdir / "a.txt").read_text(), "MODIFIED\n")
+        self.assertEqual((self.tmpdir / "new.txt").read_text(),
+                         "freshly created")
+
+    def test_position_preservation_under_end_to_start(self):
+        """Apply order MUST be end-to-start so earlier positions don't
+        shift after later replacements. Test with size-changing edits."""
+        (self.tmpdir / "a.txt").write_text("xxxxx-----yyyyy")
+        r = d._apply_changes(self._task(), self._upstream([
+            {"id": "C1", "file": "a.txt", "before": "xxxxx",
+             "after": "X"},   # shrinks
+            {"id": "C2", "file": "a.txt", "before": "yyyyy",
+             "after": "YYYYYYYYYY"},  # grows
+        ]))
+        self.assertNotIn("error", r.outputs)
+        self.assertEqual((self.tmpdir / "a.txt").read_text(),
+                         "X-----YYYYYYYYYY")
+
+
 class TestApplyViaInvokeAgent(unittest.TestCase):
     """Verify the applier is correctly registered in SYSTEM_AGENTS and
     routed through invoke_agent (not invoke_subagent)."""
