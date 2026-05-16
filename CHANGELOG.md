@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.4.1 — Arrow mojibake patterns
+
+Patch release. Adds three arrow-mojibake patterns to `_MOJIBAKE_PATTERNS`. The pattern set in v2.4.0 covered punctuation mojibake (em-dash, smart quotes, ellipsis) and Latin-1 supplement mojibake (`§`, `°`, etc.) but missed arrow characters whose UTF-8 third byte falls in the Unicode General Punctuation block and gets reinterpreted as a different cp1252 character.
+
+### Added
+- `â†'` → `→` (U+2192 right arrow — the one we hit in production)
+- `â†'` → `↑` (U+2191 up arrow)
+- `â†"` → `↓` (U+2193 down arrow)
+- One new unit test (`test_right_arrow`) covering the new pattern class
+
+### Discovery context
+v2.4.0 kickoff's SPEC-edit task: developer agent emitted `v0.3 â†' v0.4` (where SPEC.md has `v0.3 → v0.4`) in its `before` snippet. The mojibake-repair pass didn't recognize the arrow pattern, so the applier's strict before-match correctly rejected the change with `before_not_found`. Adding the patterns closes that gap.
+
+### Left arrow (`←`)
+Not included. Its UTF-8 third byte is 0x90, which is undefined in cp1252 — observed behavior varies by tool. If we see it in production, we'll add it then.
+
 ## v2.4.0 — `mojibake-repair` system agent + Windows operator docs
 
 Adds the second system agent (`mojibake-repair`) and inserts it into the standard kickoff ritual. Closes the LLM-side encoding inconsistency gap that v2.3.1's BOM-on-write couldn't reach: even with BOM'd inputs, agents occasionally emit mojibake in their outputs. The repair runs deterministically between content-producing agents and the applier.

@@ -12,9 +12,11 @@ import fnsr_daemon as d
 MOJI_EM_DASH = "â€”"      # mojibake for U+2014 em-dash
 MOJI_SECTION = "Â§"             # mojibake for U+00A7 section sign
 MOJI_DEGREE = "Â°"              # mojibake for U+00B0 degree sign
+MOJI_RIGHT_ARROW = "â†’"  # mojibake for U+2192 right arrow (explicit codepoints)
 EM_DASH = "—"
 SECTION = "§"
 DEGREE = "°"
+RIGHT_ARROW = "→"
 
 
 class TestRepairMojibake(unittest.TestCase):
@@ -30,6 +32,12 @@ class TestRepairMojibake(unittest.TestCase):
         self.assertEqual(
             d._repair_mojibake(f"hello {MOJI_EM_DASH} world"),
             f"hello {EM_DASH} world",
+        )
+
+    def test_right_arrow(self):
+        self.assertEqual(
+            d._repair_mojibake(f"v0.3 {MOJI_RIGHT_ARROW} v0.4"),
+            f"v0.3 {RIGHT_ARROW} v0.4",
         )
 
     def test_mixed_proper_and_mojibake_preserves_proper(self):

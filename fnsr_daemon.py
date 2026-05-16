@@ -526,6 +526,11 @@ _MOJIBAKE_PATTERNS = [
     ("â€", "”"),  # U+201D right double quotation mark (rare ctrl-char form)
     ("â€™", "’"),  # U+2019 right single quotation mark
     ("â€˜", "‘"),  # U+2018 left single quotation mark
+    # Arrow mojibake: UTF-8 starts with U+00E2 U+2020 (â†), then third char
+    # is U+2019 / U+2018 / U+201C depending on direction.
+    ("â†’", "→"),  # → right arrow (U+2192)
+    ("â†‘", "↑"),  # ↑ up arrow (U+2191)
+    ("â†“", "↓"),  # ↓ down arrow (U+2193)
     ("Â§", "§"),       # U+00A7 section sign
     ("Â¶", "¶"),       # U+00B6 pilcrow
     ("Â°", "°"),       # U+00B0 degree sign
