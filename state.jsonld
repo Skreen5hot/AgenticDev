@@ -17,12 +17,11 @@
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:002-roadmap-apply",
-      "agent": "applier",
+      "@id": "urn:fnsr:task:002-roadmap-repair",
+      "agent": "mojibake-repair",
       "status": "ready",
       "inputs": {
-        "source_task": "urn:fnsr:task:001-roadmap-draft",
-        "apply_root": "."
+        "source_task": "urn:fnsr:task:001-roadmap-draft"
       },
       "outputs": null,
       "depends_on": ["urn:fnsr:task:001-roadmap-draft"],
@@ -30,7 +29,20 @@
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:003-roadmap-review",
+      "@id": "urn:fnsr:task:003-roadmap-apply",
+      "agent": "applier",
+      "status": "ready",
+      "inputs": {
+        "source_task": "urn:fnsr:task:002-roadmap-repair",
+        "apply_root": "."
+      },
+      "outputs": null,
+      "depends_on": ["urn:fnsr:task:002-roadmap-repair"],
+      "attempts": 0,
+      "history": []
+    },
+    {
+      "@id": "urn:fnsr:task:004-roadmap-review",
       "agent": "spec-reviewer",
       "status": "ready",
       "inputs": {
@@ -39,70 +51,82 @@
         "focus": "completeness vs SPEC, phase ordering, scope-boundary clarity, missing concerns, ambiguous deferred decisions"
       },
       "outputs": null,
-      "depends_on": ["urn:fnsr:task:002-roadmap-apply"],
+      "depends_on": ["urn:fnsr:task:003-roadmap-apply"],
       "attempts": 0,
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:004-roadmap-critique",
+      "@id": "urn:fnsr:task:005-roadmap-critique",
       "agent": "adversarial-critic",
       "status": "ready",
       "inputs": {
-        "target": "urn:fnsr:task:003-roadmap-review",
+        "target": "urn:fnsr:task:004-roadmap-review",
         "mode": "find structural weaknesses in the roadmap, missed risks, mis-ordered phases, or aspirational acceptance language"
       },
       "outputs": null,
-      "depends_on": ["urn:fnsr:task:003-roadmap-review"],
+      "depends_on": ["urn:fnsr:task:004-roadmap-review"],
       "attempts": 0,
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:005-roadmap-synthesize",
+      "@id": "urn:fnsr:task:006-roadmap-synthesize",
       "agent": "synthesist",
       "status": "ready",
       "inputs": {
         "sources": [
-          "urn:fnsr:task:003-roadmap-review",
-          "urn:fnsr:task:004-roadmap-critique"
+          "urn:fnsr:task:004-roadmap-review",
+          "urn:fnsr:task:005-roadmap-critique"
         ]
       },
       "outputs": null,
       "depends_on": [
-        "urn:fnsr:task:003-roadmap-review",
-        "urn:fnsr:task:004-roadmap-critique"
+        "urn:fnsr:task:004-roadmap-review",
+        "urn:fnsr:task:005-roadmap-critique"
       ],
       "attempts": 0,
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:006-roadmap-revise",
+      "@id": "urn:fnsr:task:007-roadmap-revise",
       "agent": "developer",
       "status": "ready",
       "inputs": {
         "instruction": "Revise project/ROADMAP.md to address the synthesist's findings. Produce minimal targeted changes; preserve phases not flagged for revision.",
         "target_file": "project/ROADMAP.md",
-        "synthesist_task": "urn:fnsr:task:005-roadmap-synthesize"
+        "synthesist_task": "urn:fnsr:task:006-roadmap-synthesize"
       },
       "outputs": null,
-      "depends_on": ["urn:fnsr:task:005-roadmap-synthesize"],
+      "depends_on": ["urn:fnsr:task:006-roadmap-synthesize"],
       "attempts": 0,
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:007-roadmap-revise-apply",
+      "@id": "urn:fnsr:task:008-roadmap-revise-repair",
+      "agent": "mojibake-repair",
+      "status": "ready",
+      "inputs": {
+        "source_task": "urn:fnsr:task:007-roadmap-revise"
+      },
+      "outputs": null,
+      "depends_on": ["urn:fnsr:task:007-roadmap-revise"],
+      "attempts": 0,
+      "history": []
+    },
+    {
+      "@id": "urn:fnsr:task:009-roadmap-revise-apply",
       "agent": "applier",
       "status": "ready",
       "inputs": {
-        "source_task": "urn:fnsr:task:006-roadmap-revise",
+        "source_task": "urn:fnsr:task:008-roadmap-revise-repair",
         "apply_root": "."
       },
       "outputs": null,
-      "depends_on": ["urn:fnsr:task:006-roadmap-revise"],
+      "depends_on": ["urn:fnsr:task:008-roadmap-revise-repair"],
       "attempts": 0,
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:008-implementation-plan-draft",
+      "@id": "urn:fnsr:task:010-implementation-plan-draft",
       "agent": "planner",
       "status": "ready",
       "inputs": {
@@ -112,20 +136,32 @@
         "output_path": "project/IMPLEMENTATION_PLAN.md"
       },
       "outputs": null,
-      "depends_on": ["urn:fnsr:task:007-roadmap-revise-apply"],
+      "depends_on": ["urn:fnsr:task:009-roadmap-revise-apply"],
       "attempts": 0,
       "history": []
     },
     {
-      "@id": "urn:fnsr:task:009-implementation-plan-apply",
+      "@id": "urn:fnsr:task:011-implementation-plan-repair",
+      "agent": "mojibake-repair",
+      "status": "ready",
+      "inputs": {
+        "source_task": "urn:fnsr:task:010-implementation-plan-draft"
+      },
+      "outputs": null,
+      "depends_on": ["urn:fnsr:task:010-implementation-plan-draft"],
+      "attempts": 0,
+      "history": []
+    },
+    {
+      "@id": "urn:fnsr:task:012-implementation-plan-apply",
       "agent": "applier",
       "status": "ready",
       "inputs": {
-        "source_task": "urn:fnsr:task:008-implementation-plan-draft",
+        "source_task": "urn:fnsr:task:011-implementation-plan-repair",
         "apply_root": "."
       },
       "outputs": null,
-      "depends_on": ["urn:fnsr:task:008-implementation-plan-draft"],
+      "depends_on": ["urn:fnsr:task:011-implementation-plan-repair"],
       "attempts": 0,
       "history": []
     }

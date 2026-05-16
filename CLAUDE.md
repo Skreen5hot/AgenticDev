@@ -45,7 +45,8 @@ Two kinds of agents:
 
 | System agent | Role |
 |---|---|
-| [applier](.claude/agents/applier.md) | Applies a developer agent's `changes[]` to the filesystem with strict `before`-snippet matching; all-applied or CPS-vetoed |
+| [applier](.claude/agents/applier.md) | Applies a developer / planner agent's `changes[]` to the filesystem with strict `before`-snippet matching, multi-change atomic apply, and UTF-8 BOM on new files |
+| [mojibake-repair](.claude/agents/mojibake-repair.md) | Cleans known cp1252-UTF8 mojibake patterns (`Â§` → `§`, `â€"` → `—`, etc.) from upstream `changes[]` before they reach the applier |
 
 Shared agent contract:
 - Output envelope: `{"outputs": {...}}`. No prose outside the JSON.
@@ -113,19 +114,22 @@ Task statuses: `ready`, `in_progress`, `done`, `blocked`, `failed`.
 
 ## 8. The Kickoff Ritual
 
-A fresh instance of the template ships with `state.jsonld` pre-loaded with the standard **kickoff ritual** — a 9-task chain that turns a SPEC into a reviewed, revised, and detail-planned project roadmap. This is what runs when the operator clones the template, drops a SPEC.md into `./project/`, and runs the daemon.
+A fresh instance of the template ships with `state.jsonld` pre-loaded with the standard **kickoff ritual** — a 12-task chain that turns a SPEC into a reviewed, revised, and detail-planned project roadmap. This is what runs when the operator clones the template, drops a SPEC.md into `./project/`, and runs the daemon.
 
 The ritual:
 
 1. **Roadmap draft** — `planner` (mode=`roadmap`) reads `project/SPEC.md` and proposes `project/ROADMAP.md`.
-2. **Roadmap apply** — `applier` lands the proposed ROADMAP.
-3. **Roadmap review** — `spec-reviewer` analyzes the new ROADMAP against the SPEC.
-4. **Roadmap critique** — `adversarial-critic` confirms / refutes / extends the review.
-5. **Roadmap synthesize** — `synthesist` reconciles into a decision document.
-6. **Roadmap revise** — `developer` proposes targeted ROADMAP edits addressing the synthesist's findings.
-7. **Roadmap revise apply** — `applier` lands the revisions.
-8. **Implementation plan draft** — `planner` (mode=`implementation-plan`) reads SPEC + revised ROADMAP and proposes `project/IMPLEMENTATION_PLAN.md` with per-task acceptance criteria and exit gates.
-9. **Implementation plan apply** — `applier` lands it.
+2. **Roadmap repair** — `mojibake-repair` cleans encoding artifacts from the planner's output.
+3. **Roadmap apply** — `applier` lands the proposed ROADMAP.
+4. **Roadmap review** — `spec-reviewer` analyzes the new ROADMAP against the SPEC.
+5. **Roadmap critique** — `adversarial-critic` confirms / refutes / extends the review.
+6. **Roadmap synthesize** — `synthesist` reconciles into a decision document.
+7. **Roadmap revise** — `developer` proposes targeted ROADMAP edits addressing the synthesist's findings.
+8. **Roadmap revise repair** — `mojibake-repair` cleans encoding artifacts.
+9. **Roadmap revise apply** — `applier` lands the revisions.
+10. **Implementation plan draft** — `planner` (mode=`implementation-plan`) reads SPEC + revised ROADMAP and proposes `project/IMPLEMENTATION_PLAN.md` with per-task acceptance criteria and exit gates.
+11. **Implementation plan repair** — `mojibake-repair` cleans encoding artifacts.
+12. **Implementation plan apply** — `applier` lands it.
 
 After the kickoff, the operator has:
 - A `ROADMAP.md` that traces back to the SPEC, has been adversarially reviewed, and has been revised to address review findings.

@@ -55,23 +55,26 @@ The minimum you need is `./project/SPEC.md`. Optional supporting docs: `DECISION
 python fnsr_daemon.py
 ```
 
-The template ships with `state.jsonld` pre-loaded with the **kickoff ritual** — a 9-task chain that automatically turns your SPEC into a reviewed, revised ROADMAP plus a detailed implementation plan with acceptance criteria and exit gates. You don't need to queue tasks manually for the first run.
+The template ships with `state.jsonld` pre-loaded with the **kickoff ritual** — a 12-task chain that automatically turns your SPEC into a reviewed, revised ROADMAP plus a detailed implementation plan with acceptance criteria and exit gates. You don't need to queue tasks manually for the first run.
 
 The kickoff:
 
 ```
-001-roadmap-draft           (planner, mode=roadmap)        — SPEC -> ROADMAP draft
-002-roadmap-apply           (applier)                       — writes ROADMAP.md
-003-roadmap-review          (spec-reviewer)                 — analyzes ROADMAP vs SPEC
-004-roadmap-critique        (adversarial-critic)            — adversarial pass
-005-roadmap-synthesize      (synthesist)                    — reconciles 003 + 004
-006-roadmap-revise          (developer)                     — proposes ROADMAP edits
-007-roadmap-revise-apply    (applier)                       — writes revisions
-008-implementation-plan-draft  (planner, mode=implementation-plan)  — SPEC + ROADMAP -> IMPLEMENTATION_PLAN draft
-009-implementation-plan-apply  (applier)                    — writes IMPLEMENTATION_PLAN.md
+001-roadmap-draft               (planner, mode=roadmap)         — SPEC -> ROADMAP draft
+002-roadmap-repair              (mojibake-repair)                — cleans mojibake from planner output
+003-roadmap-apply               (applier)                        — writes ROADMAP.md
+004-roadmap-review              (spec-reviewer)                  — analyzes ROADMAP vs SPEC
+005-roadmap-critique            (adversarial-critic)             — adversarial pass
+006-roadmap-synthesize          (synthesist)                     — reconciles 004 + 005
+007-roadmap-revise              (developer)                      — proposes ROADMAP edits
+008-roadmap-revise-repair       (mojibake-repair)                — cleans mojibake
+009-roadmap-revise-apply        (applier)                        — writes revisions
+010-implementation-plan-draft   (planner, mode=implementation-plan)  — SPEC + ROADMAP -> IMPLEMENTATION_PLAN
+011-implementation-plan-repair  (mojibake-repair)                — cleans mojibake
+012-implementation-plan-apply   (applier)                        — writes IMPLEMENTATION_PLAN.md
 ```
 
-The first headless `claude` invocation typically takes 3-5 minutes; subsequent dispatches are faster. The full 9-task chain typically completes in 25-40 minutes depending on SPEC complexity. The daemon polls every 2 seconds for new ready tasks.
+The first headless `claude` invocation typically takes 3-5 minutes; subsequent dispatches are faster. Appliers and mojibake-repair are deterministic Python (instant). The full 12-task chain typically completes in 30-45 minutes depending on SPEC complexity. The daemon polls every 2 seconds for new ready tasks.
 
 ### 4. Inspect the result
 
@@ -163,6 +166,27 @@ The stdlib `unittest` suite covers routing, the output extractor, CPS (null + st
 - **SPL v0.2.** Priority field is the v0.1 minimum. Phase grouping, fan-out/fan-in, and conditional next-step routing are future iterations.
 - **Synthesist consensus model.** Current vocabulary is reviewer + critic specific. Multi-source panels (architect + semantic-sme + ux-sme running in parallel) need a richer consensus model.
 - **More system agents.** The applier is the first. Future candidates: test-runner, linter, git-committer — anything deterministic the daemon could run between LLM steps.
+
+## Windows operators: known encoding caveat
+
+Claude Code's `Read` tool on Windows can decode BOM-less UTF-8 files as cp1252, producing mojibake (`§` → `Â§`, `—` → `â€"`, etc.) in agent outputs. The template handles this in three layers:
+
+1. **Applier writes UTF-8 BOM** on every new file it creates (v2.3.1+). Forces Claude's Read tool to decode subsequent reads as UTF-8 reliably.
+2. **`mojibake-repair` system agent** sits between content-producing agents and the applier in the standard kickoff chain (v2.4.0+). Cleans known mojibake patterns from `changes[].before` and `changes[].after` so the applier never writes corrupted bytes.
+3. **Operator workaround for legacy files**: if you bring in pre-existing project files (e.g., a SPEC.md you drafted before adopting the template), prepend a UTF-8 BOM manually:
+
+   ```powershell
+   # PowerShell
+   $content = Get-Content project/SPEC.md -Raw -Encoding UTF8
+   [System.IO.File]::WriteAllText("project/SPEC.md", $content, [System.Text.UTF8Encoding]::new($true))
+   ```
+
+   ```bash
+   # POSIX
+   sed -i '1s/^/\xef\xbb\xbf/' project/SPEC.md
+   ```
+
+If your subject project uses only ASCII characters, none of this affects you and you can ignore this section.
 
 ## Common pitfalls
 

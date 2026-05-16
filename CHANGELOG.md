@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.4.0 — `mojibake-repair` system agent + Windows operator docs
+
+Adds the second system agent (`mojibake-repair`) and inserts it into the standard kickoff ritual. Closes the LLM-side encoding inconsistency gap that v2.3.1's BOM-on-write couldn't reach: even with BOM'd inputs, agents occasionally emit mojibake in their outputs. The repair runs deterministically between content-producing agents and the applier.
+
+### Added
+- **`mojibake-repair` system agent** — second deterministic Python agent (after `applier`). Cleans 23 known cp1252-UTF8 mojibake patterns (`Â§` → `§`, `â€"` → `—`, smart quotes, ellipsis, super/subscript, fractions, etc.) from upstream `changes[].before` and `changes[].after` before the applier consumes them.
+- **`.claude/agents/mojibake-repair.md`** — descriptive doc for the agent.
+- **15 new unit tests** covering the repair patterns, mixed proper/mojibake content preservation, and the system-agent dispatch contract.
+- **README "Windows operators" section** documenting the cp1252 Read tool issue and the three-layer mitigation (BOM on write + mojibake-repair agent + manual BOM for legacy files).
+
+### Changed
+- **Kickoff ritual: 9 tasks → 12 tasks.** Three `mojibake-repair` tasks inserted between each content-producing agent (planner / developer) and the corresponding applier task. Operators who don't need the repair (ASCII-only subject projects) can remove the three tasks from `state.jsonld`.
+- Task IDs renumbered: `002-roadmap-apply` is now `003-roadmap-apply`, etc. Existing customized `state.jsonld` files from earlier versions need no changes — only the template's default ships with the new chain.
+- CLAUDE.md §3 (Agent Roster) and §8 (Kickoff Ritual) updated to reflect the new agent + chain.
+
+### Discovery context
+v2.2/v2.3 kickoff produced an `IMPLEMENTATION_PLAN.md` with 190 mojibake `Â§` AND 190 proper `§` mixed together — the same planner emitted both correct and corrupted bytes for the same section-reference pattern. BOM-on-write (v2.3.1) prevents this for future file reads, but doesn't help when an agent has ALREADY emitted mojibake into its output JSON. `mojibake-repair` runs after the agent, cleans the output deterministically, and feeds the cleaned changes to the applier.
+
+### False-positive risk
+A document legitimately containing `Â§` or `â€"` literally (e.g., a tutorial about mojibake — yes, the irony is not lost on us) will be rewritten by the repair. Operators with such content can skip the repair tasks by removing them from `state.jsonld`.
+
 ## v2.3.1 — Applier writes UTF-8 BOM on new files
 
 Patch release. The applier now prepends a UTF-8 BOM (`EF BB BF`) when creating new files unless the content already starts with one. This forces Claude Code's `Read` tool to decode the file as UTF-8 on subsequent agent reads, instead of defaulting to cp1252 on Windows — which silently produced mojibake (e.g., `§` rendered as `Â§`) and broke downstream `before`-match in apply tasks.

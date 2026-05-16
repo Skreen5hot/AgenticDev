@@ -514,8 +514,116 @@ def _apply_changes(task: dict[str, Any],
                         "", "")
 
 
+# Known mojibake patterns: UTF-8 byte sequences misinterpreted as cp1252
+# and then re-encoded as UTF-8. Mostly produced by Claude Code's Read tool
+# on Windows when reading BOM-less UTF-8 files, and by LLM agents that
+# echo such mis-decoded characters back into their output.
+_MOJIBAKE_PATTERNS = [
+    ("â€”", "—"),     # U+2014 em-dash
+    ("â€“", "–"),     # U+2013 en-dash
+    ("â€¦", "…"),     # U+2026 horizontal ellipsis
+    ("â€œ", "“"),  # U+201C left double quotation mark
+    ("â€", "”"),  # U+201D right double quotation mark (rare ctrl-char form)
+    ("â€™", "’"),  # U+2019 right single quotation mark
+    ("â€˜", "‘"),  # U+2018 left single quotation mark
+    ("Â§", "§"),       # U+00A7 section sign
+    ("Â¶", "¶"),       # U+00B6 pilcrow
+    ("Â°", "°"),       # U+00B0 degree sign
+    ("Â©", "©"),       # U+00A9 copyright
+    ("Â®", "®"),       # U+00AE registered
+    ("Â±", "±"),       # U+00B1 plus-minus
+    ("Â´", "´"),       # U+00B4 acute accent
+    ("Â·", "·"),       # U+00B7 middle dot
+    ("Â¹", "¹"),       # U+00B9 superscript 1
+    ("Â²", "²"),       # U+00B2 superscript 2
+    ("Â³", "³"),       # U+00B3 superscript 3
+    ("Â½", "½"),       # U+00BD one half
+    ("Â¼", "¼"),       # U+00BC one quarter
+    ("Â¾", "¾"),       # U+00BE three quarters
+    ("Â«", "«"),       # U+00AB left guillemet
+    ("Â»", "»"),       # U+00BB right guillemet
+]
+
+
+def _repair_mojibake(text: Any) -> Any:
+    """Replace known cp1252-misinterpreted-as-UTF-8 mojibake patterns with
+    the intended characters. Returns input unchanged if not a string."""
+    if not isinstance(text, str):
+        return text
+    for bad, good in _MOJIBAKE_PATTERNS:
+        text = text.replace(bad, good)
+    return text
+
+
+def _mojibake_repair(task: dict[str, Any],
+                     upstream: dict[str, Any]) -> "WorkerResult":
+    """
+    System agent: clean known mojibake patterns from an upstream content-
+    producing agent's `changes[]` (developer or planner). Produces the
+    same `changes[]` shape so the next applier task consumes it
+    transparently. Sits between content-producing agents and the applier
+    in the kickoff ritual.
+
+    Inputs schema:
+      source_task : str  <- @id of upstream task whose outputs.changes[]
+                            need mojibake cleanup
+    """
+    log.info("dispatch task=%s system_agent=mojibake-repair", task["@id"])
+    inputs = task.get("inputs") or {}
+    source_id = inputs.get("source_task")
+
+    if not source_id:
+        return WorkerResult(True,
+                            {"error": "missing_source_task",
+                             "needed": ["inputs.source_task"]},
+                            "", "")
+
+    source = upstream.get(source_id)
+    if not isinstance(source, dict):
+        return WorkerResult(True,
+                            {"error": "source_not_in_upstream",
+                             "source_task": source_id},
+                            "", "")
+
+    changes = source.get("changes")
+    if not isinstance(changes, list):
+        return WorkerResult(True,
+                            {"error": "source_has_no_changes",
+                             "source_task": source_id},
+                            "", "")
+
+    repaired: list[dict[str, Any]] = []
+    total_replacements = 0
+    fields_affected = 0
+    for c in changes:
+        if not isinstance(c, dict):
+            repaired.append(c)
+            continue
+        new_c = dict(c)
+        for field in ("before", "after"):
+            orig = new_c.get(field)
+            if not isinstance(orig, str):
+                continue
+            fixed = _repair_mojibake(orig)
+            if fixed != orig:
+                new_c[field] = fixed
+                fields_affected += 1
+                for bad, _ in _MOJIBAKE_PATTERNS:
+                    total_replacements += orig.count(bad)
+        repaired.append(new_c)
+
+    return WorkerResult(True, {
+        "changes": repaired,
+        "summary": (f"repaired {total_replacements} mojibake instance(s) "
+                    f"across {fields_affected} field(s) in "
+                    f"{len(changes)} change(s)"),
+        "self_assessment": "confident",
+    }, "", "")
+
+
 SYSTEM_AGENTS = {
     "applier": _apply_changes,
+    "mojibake-repair": _mojibake_repair,
 }
 
 
