@@ -35,6 +35,7 @@ Two kinds of agents:
 | [spec-reviewer](.claude/agents/spec-reviewer.md) | Structural, ontological, conformance review of specifications |
 | [adversarial-critic](.claude/agents/adversarial-critic.md) | Confirm / refute / extend an upstream reviewer's findings |
 | [synthesist](.claude/agents/synthesist.md) | Reconcile a reviewer + critic into a single decision document |
+| [planner](.claude/agents/planner.md) | Author strategic ROADMAP or tactical IMPLEMENTATION_PLAN from a SPEC (mode-switched) |
 | [architect](.claude/agents/architect.md) | System-level structural review; tradeoffs and load-bearing decisions |
 | [developer](.claude/agents/developer.md) | Minimal change proposals — describe-only (no Edit / Write tools) |
 | [semantic-sme](.claude/agents/semantic-sme.md) | Ontology, BFO/CCO grounding, OWL DL conformance |
@@ -110,7 +111,34 @@ The daemon runs a single-worker loop:
 
 Task statuses: `ready`, `in_progress`, `done`, `blocked`, `failed`.
 
-## 8. Session Workflow
+## 8. The Kickoff Ritual
+
+A fresh instance of the template ships with `state.jsonld` pre-loaded with the standard **kickoff ritual** — a 9-task chain that turns a SPEC into a reviewed, revised, and detail-planned project roadmap. This is what runs when the operator clones the template, drops a SPEC.md into `./project/`, and runs the daemon.
+
+The ritual:
+
+1. **Roadmap draft** — `planner` (mode=`roadmap`) reads `project/SPEC.md` and proposes `project/ROADMAP.md`.
+2. **Roadmap apply** — `applier` lands the proposed ROADMAP.
+3. **Roadmap review** — `spec-reviewer` analyzes the new ROADMAP against the SPEC.
+4. **Roadmap critique** — `adversarial-critic` confirms / refutes / extends the review.
+5. **Roadmap synthesize** — `synthesist` reconciles into a decision document.
+6. **Roadmap revise** — `developer` proposes targeted ROADMAP edits addressing the synthesist's findings.
+7. **Roadmap revise apply** — `applier` lands the revisions.
+8. **Implementation plan draft** — `planner` (mode=`implementation-plan`) reads SPEC + revised ROADMAP and proposes `project/IMPLEMENTATION_PLAN.md` with per-task acceptance criteria and exit gates.
+9. **Implementation plan apply** — `applier` lands it.
+
+After the kickoff, the operator has:
+- A `ROADMAP.md` that traces back to the SPEC, has been adversarially reviewed, and has been revised to address review findings.
+- An `IMPLEMENTATION_PLAN.md` with falsifiable acceptance criteria and exit gates per phase.
+- A complete audit trail in `state.jsonld` of every step in the ritual.
+
+Subsequent work — implementation, more review chains, applier writes against actual code — proceeds from this foundation.
+
+**Prerequisite for the ritual:** `./project/SPEC.md` MUST exist. If it doesn't, task 001 vetoes with `error: spec_insufficient` and the chain stalls at `status=blocked`.
+
+**Customizing the ritual:** edit `state.jsonld` before running. Operators may add review passes for architect / semantic-sme / ux-sme between revise and implementation-plan, replace the planner with their own, or skip phases that don't apply. The 9-task chain is the v0 default, not a constraint.
+
+## 9. Session Workflow
 
 ### Starting a session
 
@@ -141,7 +169,7 @@ For review work on the subject project (via daemon dispatch):
 2. Log architectural decisions in `./project/DECISIONS.md`.
 3. Summarize technical debt created that requires future refactoring.
 
-## 9. Subject Project Conventions
+## 10. Subject Project Conventions
 
 Barcode expects the subject project to live at `./project/` relative to the Barcode root. The conventional layout:
 
@@ -157,7 +185,7 @@ Barcode expects the subject project to live at `./project/` relative to the Barc
 
 Subject-specific layer boundaries, validation commands, language conventions, and test strategies live INSIDE `./project/` — typically in the project's own SPEC.md or CLAUDE.md. Barcode reads from these but does not bake them in.
 
-## 10. Key Files
+## 11. Key Files
 
 | File | Purpose |
 |---|---|

@@ -38,83 +38,64 @@ cp -r barcode-template/ my-project/
 cd my-project/
 ```
 
-### 2. Add your subject project
+### 2. Drop your SPEC into `./project/`
 
-By convention, the subject project lives at `./project/`. Create that directory and drop in your specification:
+By convention, the subject project lives at `./project/`. Create the directory and drop in your specification:
 
 ```
 mkdir -p project/
-# Place your SPEC.md, ROADMAP.md, DECISIONS.md, and any source files under ./project/
+# Place your SPEC.md (required) and any supporting docs under ./project/
 ```
 
-The minimum you need is `./project/SPEC.md`. Everything else is optional but recommended.
+The minimum you need is `./project/SPEC.md`. Optional supporting docs: `DECISIONS.md`, `README.md`, source fixtures.
 
-### 3. Queue your first task
-
-Edit `state.jsonld`. Minimal example — a single spec review:
-
-```json
-{
-  "@context": "https://fnsr.example/context.jsonld",
-  "@id": "urn:fnsr:run:my-project",
-  "tasks": [
-    {
-      "@id": "urn:fnsr:task:001-spec-review",
-      "agent": "spec-reviewer",
-      "status": "ready",
-      "inputs": {
-        "artifact": "My Project Specification",
-        "artifact_path": "project/SPEC.md",
-        "focus": "structural, ontological, and conformance issues"
-      },
-      "outputs": null,
-      "depends_on": [],
-      "attempts": 0,
-      "history": []
-    }
-  ]
-}
-```
-
-### 4. Run the daemon
+### 3. Run the daemon
 
 ```
 python fnsr_daemon.py
 ```
 
-You'll see:
+The template ships with `state.jsonld` pre-loaded with the **kickoff ritual** — a 9-task chain that automatically turns your SPEC into a reviewed, revised ROADMAP plus a detailed implementation plan with acceptance criteria and exit gates. You don't need to queue tasks manually for the first run.
+
+The kickoff:
 
 ```
-fnsr-daemon starting: state=state.jsonld agents=.claude/agents pid=<n>
-dispatch task=urn:fnsr:task:001-spec-review agent=spec-reviewer
-task urn:fnsr:task:001-spec-review done
+001-roadmap-draft           (planner, mode=roadmap)        — SPEC -> ROADMAP draft
+002-roadmap-apply           (applier)                       — writes ROADMAP.md
+003-roadmap-review          (spec-reviewer)                 — analyzes ROADMAP vs SPEC
+004-roadmap-critique        (adversarial-critic)            — adversarial pass
+005-roadmap-synthesize      (synthesist)                    — reconciles 003 + 004
+006-roadmap-revise          (developer)                     — proposes ROADMAP edits
+007-roadmap-revise-apply    (applier)                       — writes revisions
+008-implementation-plan-draft  (planner, mode=implementation-plan)  — SPEC + ROADMAP -> IMPLEMENTATION_PLAN draft
+009-implementation-plan-apply  (applier)                    — writes IMPLEMENTATION_PLAN.md
 ```
 
-The first headless `claude` invocation typically takes 3–5 minutes. Subsequent dispatches are faster. The daemon polls every 2 seconds for new ready tasks.
+The first headless `claude` invocation typically takes 3-5 minutes; subsequent dispatches are faster. The full 9-task chain typically completes in 25-40 minutes depending on SPEC complexity. The daemon polls every 2 seconds for new ready tasks.
 
-### 5. Inspect the result
+### 4. Inspect the result
 
-```
-python -c "import json; s=json.load(open('state.jsonld')); print(json.dumps(s['tasks'][0]['outputs'], indent=2))"
-```
+After the chain completes you'll have:
 
-You'll see structured findings keyed by severity. Every transition is hash-chained into the task's `history`.
-
-### 6. Chain follow-ups
-
-Add more tasks to `state.jsonld` that `depends_on` the first one — adversarial critique, synthesis, architecture review. The daemon respects the dep graph and routes each one when its predecessors are `done`. A common three-task chain:
+- `project/ROADMAP.md` — strategic phases tracing back to the SPEC, adversarially reviewed and revised
+- `project/IMPLEMENTATION_PLAN.md` — falsifiable acceptance criteria and exit gates per phase
+- `state.jsonld` — full audit trail of every transition (every change hash-chained)
 
 ```
-001-spec-review     (spec-reviewer)         deps: []
-002-spec-critique   (adversarial-critic)    deps: [001]
-003-spec-synthesize (synthesist)            deps: [001, 002]
+python -c "import json; s=json.load(open('state.jsonld')); [print(t['@id'], t['status']) for t in s['tasks']]"
 ```
 
-The synthesist receives the first two tasks' outputs via the prompt's `UPSTREAM` block (the daemon injects upstream data; agents do not read `state.jsonld`).
+Each task's `history` array records every event with `prev_hash` and `chain_hash`.
 
-### 7. Stop the daemon
+### 5. Stop the daemon (when it's done or you want a break)
 
 `Ctrl-C` in the daemon's terminal. The current cycle completes, then it exits cleanly. State is safe — atomic writes mean interrupts can't corrupt anything.
+
+### 6. Continue with implementation
+
+After the kickoff, you have a vetted ROADMAP + IMPLEMENTATION_PLAN. The next phase is implementing against them. Queue more tasks in `state.jsonld` — typically a chain of `architect` (structural review of proposed approach) → `developer` (changes proposals) → `applier` (lands the code) per phase.
+
+The synthesist and other reviewers can run on the implementation outputs the same way they ran on the roadmap.
 
 ## How it works (short version)
 
