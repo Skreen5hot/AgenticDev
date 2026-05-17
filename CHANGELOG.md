@@ -4,6 +4,56 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.8.0-alpha.1 — Verification ritual Checkpoint 1: Cat 1-7 deterministic + surfaces directory
+
+First checkpoint of v2.8.0, implementing FNSR Protocol Spec 02 in stages per the four-checkpoint plan. Ships the foundation: the `surfaces/` directory layout, category-spec loader, seven deterministic category predicates (Cat 1–7), and the `verification-ritual` system agent orchestrator. Cat 8 hybrid + Cat 10 hook framework + two-cadence handling land in CP2 (v2.8.0-alpha.2). LLM-required Cat 9 + adversarial-critic second-pass land in CP3.
+
+### Added
+- **`surfaces/verification/` directory** — first explicit use of FNSR Spec 01's surface-registry primitive. Contains `surface-spec.md` (verification surface metadata) and `categories/` (per-category spec files). Future surfaces (cycle, commit, bankings, forward-track) follow the same `surfaces/<surface>/<bucket-or-category>/` layout.
+- **Seven category spec files** under `surfaces/verification/categories/`:
+  - `cat-01-spec-section-existence.md` — STRUCTURAL spec §N.M citation check
+  - `cat-02-adr-cross-reference.md` — STRUCTURAL ADR-NNN registry existence
+  - `cat-03-q-ruling-cross-reference.md` — STRUCTURAL Q-ruling identifier resolution
+  - `cat-04-reason-code-frozen-enum.md` — STRUCTURAL expectedReason against frozen enum
+  - `cat-05-fol-owl-type-discriminator.md` — STRUCTURAL @type membership in FOL∪OWL canonical sets
+  - `cat-06-manifest-mirror-consistency.md` — STRUCTURAL manifest-mirror against fixture expectedOutcome fields
+  - `cat-07-cross-phase-cross-reference.md` — STRUCTURAL cross-phase/cross-amendment path resolution + reciprocal-reference symmetry
+- **Category-spec loader** (`_load_category_specs`, `_parse_category_frontmatter`, `_resolve_predicate`) in `fnsr_daemon.py`. Reads category spec frontmatter (YAML-ish, stdlib-only parsing); resolves named Python predicates from the daemon's globals.
+- **Seven Cat 1–7 deterministic predicates** in `fnsr_daemon.py` (`cat_01_spec_section_existence` through `cat_07_cross_phase_cross_reference`). Each takes `(artifact_text, canonical_sources)` and returns `{status: pass|veto|miss, evidence: <category-specific dict>}`.
+- **`verification-ritual` system agent** registered in `SYSTEM_AGENTS`. Loads category specs at dispatch time; filters by cadence + canonical-source availability; runs each applicable category's predicate; aggregates into `per_category_result`, `overall_status` (pass | veto | needs_llm_judgment), `new_candidacies`, `summary`. Required outputs declared in `.claude/agents/verification-ritual.md` frontmatter; CPS enforces.
+- **`FNSR_SURFACES_DIR` env var** (default `./surfaces`) — operator can override the surfaces directory location.
+- **48 new unit tests** in `tests/test_verification_ritual.py`. Full suite: 238 tests (was 190; +48).
+
+### Architecture per Aaron's adjudications
+- **Call 1 (two-agent split)**: this release ships only the `verification-ritual` system agent. LLM-required categories (Cat 9 + Cat 8-semantic-equivalence) defer via `overall_status: needs_llm_judgment` for a future `verification-ritual-llm` worker agent (CP3). Operator-composes-chains pattern matches v2.7.0.
+- **Call 2 (categories directory)**: `surfaces/verification/categories/cat-NN-*.md`. Adding a new category = drop a new file + implement the predicate; no substrate release.
+- **Gap A (Cat 10 subject-project hook)**: framework ships in CP2; CP1 doesn't include Cat 10.
+- **Gap C (commit-finalize explicit-chain gating)**: not wired in CP1; documented in the verification-ritual agent contract for CP4 finalization.
+- **Gap D (two-cadence handling)**: pre-routing categories filtered correctly in CP1; activation-time-only categories filtered out. Cat 8 two-cadence specifics land in CP2.
+
+### Open gaps surfacing from CP1 implementation
+- See "Gaps F–H" notes in the CP1 commit message and the v2.8.0-alpha.1 GitHub release notes for adjudication before CP2 begins.
+
+### Operator workflow
+For v2.8.0-alpha.1 (CP1), the verification-ritual is dispatched as a normal task. Example:
+
+```json
+{
+  "@id": "urn:fnsr:task:verify-Q-4-Step5-A",
+  "agent": "verification-ritual",
+  "inputs": {
+    "artifact_path": "project/reviews/Q-4-Step5-A.md",
+    "canonical_sources": {
+      "spec": "project/SPEC.md",
+      "decisions": "project/DECISIONS.md"
+    },
+    "cadence": "pre-routing"
+  }
+}
+```
+
+Operator queues this upstream of `architect` (mode: ratification) per Gap C; the architect reads `UPSTREAM[verification-ritual-task-id].outputs.overall_status` and refuses ratification on `veto`.
+
 ## v2.7.0 — Pass 2a sequencing (FNSR Spec 03), banking lifecycle (Spec 05), Forward-Track Surface (Spec 07)
 
 Minor release implementing v2.7.0 of the FNSR Protocol Specifications v1.1 bundle (Logic-Team-reviewed; delivered as `project/Routing/`). This is the substrate-level work that enables Pass 2a evidence-gated change, makes the banking lifecycle first-class, and introduces the Forward-Track Surface as structurally distinct from bankings. Five pieces:
