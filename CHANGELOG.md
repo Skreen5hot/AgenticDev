@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.6.0 — ADR-citation CPS check, awaiting_operator_decision handoff, forward-track banking
+
+Minor release adding three operator-protocol surfaces driven by lessons from the GraphWrite kickoff session. Where v2.5.0 hardened the operator's *recovery* tools (PLAYBOOK, state_admin reset/abandon, question-resolver), v2.6.0 hardens the operator's *handoff* and *insight-preservation* surfaces. Four pieces:
+
+### Added
+- **ADR-citation CPS check.** When a worker agent proposes a `changes[].after` payload destined for a canonical doc (default: `project/DECISIONS.md`, `project/SPEC.md`, `project/ROADMAP.md`, `project/IMPLEMENTATION_PLAN.md`, anything under `arc/`), the daemon parses the proposed content for `ADR-NNN` citations and vetoes the commit if any cited ADR is not a `## ADR-NNN:` header in `project/DECISIONS.md`. Closes the "agent invents ADR-007 in SPEC.md before ADR-007 is registered" failure mode. Scoped — citations in non-canonical paths (e.g., source comments) are NOT checked.
+  - Helpers: `_load_adr_registry`, `_is_canonical_doc`, `_check_adr_citations`.
+  - Configuration: `FNSR_DECISIONS_PATH`, `FNSR_CANONICAL_DOCS`, `FNSR_CANONICAL_DOC_PREFIXES`.
+- **`awaiting_operator_decision` task status.** An agent that hits a question only the operator can answer may return `{"outputs": {"status": "awaiting_operator_decision", "options": [...], "recommendation": "..."}}`. The daemon recognizes this shape, validates it (non-empty `options[]`, non-empty `recommendation`), and commits the task with the new status. Daemon startup emits a WARNING per awaiting task so operators see them on resume.
+  - Helper: `_validate_awaiting_decision_shape`.
+  - CPS vetoes on malformed shape (empty options, missing/blank recommendation, wrong types).
+- **`state_admin.py resolve <task-id> <option-index>`** — closes an awaiting task by selecting an option. Validates the task IS awaiting, validates the index is in range, appends an `operator_resolution` audit entry (chain-hashed), annotates `outputs.operator_resolution`, sets `status=done`. Supports `--note` for the rationale.
+- **`state_admin.py bank <anchor-task-id> --class {methodology|pattern|risk|insight} --content "..." [--cycle N]`** — appends a `forward_track` history entry on the anchor task. Captures methodology insights / recurring patterns / latent risks that aren't yet actionable as tasks or ADRs. Entries chain into the audit trail; retrospective sweeps fold the highest-signal ones into PLAYBOOK / template / ADRs.
+- **`state_admin.py status` surfaces awaiting tasks** at the top of its output under an `!! AWAITING OPERATOR DECISION` header.
+- **32 new unit tests** across `test_adr_and_awaiting.py` (22: ADR registry parser, canonical-doc scoping, ADR-citation check with valid/missing/multi-citation/mixed cases, awaiting-decision shape validation) and `test_state_admin.py` extensions (10: resolve happy-path + validation + audit-chain integrity, bank events, status highlights awaiting). Full suite: 151 tests.
+
+### Changed
+- CLAUDE.md §2 (Architectural Commitments) — CPS hook description now enumerates all veto reasons including ADR-citation and awaiting-shape.
+- CLAUDE.md §5 (Validation) — test coverage description updated.
+- CLAUDE.md §7 (Barcode Flow) — step 7 documents the awaiting-decision commit branch; step 8 documents the startup WARNING scan. Task statuses list gains `awaiting_operator_decision`.
+- CLAUDE.md gains §7.5 (canonical docs + ADR-citation CPS), §7.6 (operator-decision handoff path), §7.7 (forward-track banking).
+- CLAUDE.md §11 (Key Files) — `state_admin.py` row enumerates resolve and bank subcommands and the status awaiting-surfacing behavior.
+- PLAYBOOK.md gains two failure-mode entries (ADR-citation veto, malformed awaiting_operator_decision) in §1 and two new operator-workflow sections (§4.5 resolving an awaiting task, §4.6 banking forward-track insights).
+
+### Why a minor version (v2.6.0) instead of a patch
+v2.6.0 introduces new daemon-recognized contract shapes (`awaiting_operator_decision`), a new CPS check, and two new operator CLI subcommands. New observable surface area, but backward compatible — existing agents and existing state files keep working unchanged.
+
+### Operator workflow shifts
+- Authoring ADRs is now a daemon-enforced contract: register the ADR header in DECISIONS.md *before* citing the ADR number in any canonical doc. The CPS check makes the ordering explicit.
+- When an agent doesn't have enough context to decide, it can punt to the operator via `status=awaiting_operator_decision` instead of producing wrong-shape output or asking for retries. Operator resolves via `state_admin.py resolve`.
+- Methodology / pattern / risk observations that arise mid-run no longer need to be jotted in scratch files. Bank them against an anchor task and let retrospective sweeps fold them in.
+
 ## v2.5.0 — Operator playbook, state_admin CLI, question-resolver agent, developer task-scope heuristic
 
 Minor release packaging the operational lessons from a full real-world kickoff session. The patches in v2.0–v2.4.2 hardened the daemon against specific failure modes; v2.5.0 hardens the operator experience around them. Four pieces:
