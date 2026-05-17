@@ -4,6 +4,54 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.7.0 — Pass 2a sequencing (FNSR Spec 03), banking lifecycle (Spec 05), Forward-Track Surface (Spec 07)
+
+Minor release implementing v2.7.0 of the FNSR Protocol Specifications v1.1 bundle (Logic-Team-reviewed; delivered as `project/Routing/`). This is the substrate-level work that enables Pass 2a evidence-gated change, makes the banking lifecycle first-class, and introduces the Forward-Track Surface as structurally distinct from bankings. Five pieces:
+
+### Added
+- **`reconnaissance` worker agent** at [.claude/agents/reconnaissance.md](.claude/agents/reconnaissance.md). Read-only by contract (tools: Read, Grep, Glob; no Edit/Write/Bash). Produces `findings`, `summary`, `evidence_paths` — no proposals, no recommendations. First instance of the **read-only-by-contract agent pattern**; future agents that gather evidence without taking action (verification-ritual deterministic categories, adversarial-critic second-pass verdicts, FNSR moral-person evidence-collection) draw on this shape. Includes a `scope_violation` structured-error refusal when asked to do something outside the contract.
+- **`architect` worker agent extended to two modes** at [.claude/agents/architect.md](.claude/agents/architect.md):
+  - `review` (existing v2.5.0 contract): structural findings + recommendations
+  - `ratification` (new in v2.7.0; FNSR Spec 03 Pass 2a): six-field ruling payload with `ruling`, `editorial_verdict`, `editorial_verdict_reason`, `rationale`, `referenced_evidence`, `bankings`. Includes the refusal contract (substantive changes without UPSTREAM reconnaissance → `ruling: denied, rationale: reconnaissance_required`). The `editorial_verdict_reason` field is the audit-surfacing mechanism for the LLM's classification rationale.
+- **Daemon: multi-mode `required_outputs` parsing.** Agent frontmatter now supports both flat-list syntax (single-mode agents) AND per-mode dict syntax (multi-mode agents like architect). CPS reads `task.inputs.mode` to pick the right required_outputs list at check time. Backward-compatible: single-mode agents continue to declare `required_outputs: [a, b, c]` as before.
+- **`state_admin.py bank` extended (FNSR Spec 05)** with `--category` (Spec 05 taxonomy: methodology-refinement-candidate | pattern-observation | discipline-correction | contingency-operationalization | discipline-state-transition-observation; default pattern-observation) and `--state` (1=verbal-pending, 2=partially-committed, 3=formalized; default 1). Emits `event=banking` events with the full Spec 05 audit event structure (`banking_id`, `category`, `state`, `transition_history`, `forward_tracked_by`, optional `surfacing_cycle`). The v2.6.0 `--candidate-class` flag is still accepted and mapped to Spec 05 categories. Existing v2.6.0 audit events (event=forward_track with candidate_class payload) remain in the chain untouched and are read as legacy bankings; no migration; no phantom transition events backfilled.
+- **`state_admin.py transition-banking <banking-id> --to-state N --reason "..."`** (FNSR Spec 05 §"Lifecycle state transitions"). Emits a `banking_state_transition` audit event on the same task that hosts the banking's create event. For operators electing explicit-mode lifecycle operation. Includes `--trigger` (e.g., `pass_2b_commit_landed`, `phase_exit_doc_pass_fold`, `manual_operator_action`).
+- **`state_admin.py phase-boundary <from> <to> --anchor-task <id>`**. Emits a `phase_boundary_declared` audit event. Substrate is phase-schema-neutral; operator declares boundaries as first-class events.
+- **`state_admin.py forward-track create`** (FNSR Spec 07). Creates a forward-track in State A with the FULL Spec 07 audit event structure, including fields not yet operated on in v2.7.0 (`inherited_through_phases: []`, `transition_history: [{state: A, ...}]`). v2.8.0's `transition`/`list` commands must read these without migration.
+- **`state_admin.py forward-track inherit --from-phase <id> --to-phase <id>`** (FNSR Spec 07). Walks all Spec 07 forward-track events; for unresolved forward-tracks (state A or B) whose current phase context matches `--from-phase`, emits a `forward_track_phase_inheritance` event on the same anchor task. Does not double-inherit (a forward-track inherited from phase-3 → phase-4 will not match a subsequent `--from-phase phase-3` call).
+- **34 new tests.** Full suite: 190 tests (was 156; +5 from v2.6.1 ADR-012 ghost fixture, +29 from v2.7.0 surface). Coverage: state_admin extensions (bank v2.7.0 shape, legacy back-compat, transition-banking, phase-boundary, forward-track create/inherit), multi-mode required_outputs parsing, reconnaissance contract, architect ratification ruling shape, CPS multi-mode behavior.
+
+### Changed
+- CLAUDE.md §3 Agent Roster — `reconnaissance` added to worker agents; `architect` row updated to document the two-mode operating contract.
+- CLAUDE.md §3 shared agent contract — `required_outputs:` bullet updated to document multi-mode dict syntax.
+- CLAUDE.md §5 Validation — test count updated; coverage expanded for v2.7.0 additions.
+- CLAUDE.md §7.7 (Banking Lifecycle, Spec 05) replaces v2.6.0's "Forward-Track Banking" section. Documents three-state lifecycle; implicit vs explicit operating modes; v2.6.0 backward compatibility.
+- CLAUDE.md gains §7.8 (Pass 2a Sequencing per Spec 03), §7.9 (Phase Boundaries and the Forward-Track Surface per Spec 07), §7.10 (Forward-Track vs Banking Distinction — substrate naming correction).
+- CLAUDE.md §10 Key Files — `state_admin.py` row enumerates the v2.7.0 subcommands and notes the v2.6.0 back-compat.
+- PLAYBOOK.md §1 gains three new failure-mode entries: `ruling: denied, rationale: reconnaissance_required`; architect ratification missing `editorial_verdict_reason`; reconnaissance agent returned `error: scope_violation`.
+- PLAYBOOK.md §4.6 (Banking insights) updated for v2.7.0 Spec 05 lifecycle; documents implicit-vs-explicit operating modes and v2.6.0 back-compat.
+- PLAYBOOK.md gains §4.7 (Pass 2a sequencing: reconnaissance → ratification) and §4.8 (Phase boundaries and forward-track inheritance).
+
+### Why a minor version (v2.7.0) instead of v3.0.0
+v2.7.0 adds new daemon-recognized contract shapes (multi-mode required_outputs, architect ratification, reconnaissance agent), four new operator CLI subcommands, and a substrate-level naming correction (banking vs forward-track). All backward compatible — existing v2.6.x agents and v2.6.x state files keep working unchanged. The migration is operator-side: new chains use the v2.7.0 surface; old chains and events remain valid.
+
+### Why Pass 2b commit-finalize is NOT in v2.7.0
+v2.7.0 ships Pass 2a (reconnaissance + ratification + architect refusal contract). The verification-ritual agent that gates Pass 2b commit-finalize is v2.8.0 work per FNSR Spec 02. In v2.7.0 interim, the operator manually queues an applier task after ratification succeeds. The audit chain shows `reconnaissance → ratification → operator-applier`; v2.8.0 changes only the third step to `commit-finalize` (verification-ritual-gated). Clean transition; no transitional task type to deprecate.
+
+### Operator workflow shifts
+- Substantive changes (defined terms, ADR text, normative shall/must, behavioral spec content) now require a reconnaissance task in UPSTREAM of the architect ratification. Editorial changes (typos, formatting, terminology-tightening, citation format) bypass reconnaissance per the architect's `editorial_verdict: editorial` classification.
+- Bankings can be emitted with explicit `--category` (Spec 05) and `--state`. Or stay implicit (default state 1, default category pattern-observation) and let phase-exit doc-pass reconcile. Both modes are first-class.
+- Phase boundaries are operator-declared audit events. Forward-track inheritance is a paired separate command. The substrate doesn't know what "phase" means — that's the subject project.
+
+### FNSR-relevance note
+The `reconnaissance` agent is the first instance of the read-only-by-contract agent pattern. Its contract is defined by what it CANNOT do (Read/Grep/Glob, no Edit/Write, produces findings not proposals). Future agents that need similar narrow scope can draw on this shape. Worth keeping the frontmatter and prompt structure clean enough to serve as a template for the verification-ritual deterministic categories (v2.8.0), the adversarial-critic second-pass verdicts (Spec 02 Cat 9), and eventually whatever evidence-gathering agents the FNSR moral-person substrate may need.
+
+### Provenance
+- FNSR Protocol Specifications v1.1 bundle (`project/Routing/00-README.md` and `01–07-*.md`); Logic Team instance-layer review folded in.
+- Spec 03 (Pass 2a/2b sequencing) — reconnaissance/ratification/commit-finalize task types, architect refusal contract.
+- Spec 05 (Banking Lifecycle) — three-state lifecycle, taxonomy, audit event structure, implicit-vs-explicit operating-mode neutrality.
+- Spec 07 (Forward-Track Surface) — surface separation from bankings, audience sub-surfaces, audit event structure including unused-in-v2.7.0 fields.
+
 ## v2.6.1 — ADR-012 ghost test fixture (Spec 06 anchor for v2.7.0+ Cat 9)
 
 Patch release. Adds the canonical ADR-citation mismatch fixture (the "ADR-012 ghost") from FNSR Protocol Spec 06 as a regression-locked test class in `tests/test_adr_and_awaiting.py`. No daemon behavior change.

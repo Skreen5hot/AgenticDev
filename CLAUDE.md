@@ -36,7 +36,8 @@ Two kinds of agents:
 | [adversarial-critic](.claude/agents/adversarial-critic.md) | Confirm / refute / extend an upstream reviewer's findings |
 | [synthesist](.claude/agents/synthesist.md) | Reconcile a reviewer + critic into a single decision document |
 | [planner](.claude/agents/planner.md) | Author strategic ROADMAP or tactical IMPLEMENTATION_PLAN from a SPEC (mode-switched) |
-| [architect](.claude/agents/architect.md) | System-level structural review; tradeoffs and load-bearing decisions |
+| [architect](.claude/agents/architect.md) | Two modes (selected via `inputs.mode`): `review` (structural findings + recommendations) and `ratification` (Pass 2a ruling per FNSR Spec 03; six-field ruling payload + refusal contract) |
+| [reconnaissance](.claude/agents/reconnaissance.md) | **Read-only-by-contract.** Gathers findings/evidence about the subject project's current state; produces no proposals, no recommendations. First instance of the read-only-by-contract agent pattern (FNSR Spec 03 reconnaissance requirement for substantive changes). |
 | [developer](.claude/agents/developer.md) | Minimal change proposals — describe-only (no Edit / Write tools) |
 | [semantic-sme](.claude/agents/semantic-sme.md) | Ontology, BFO/CCO grounding, OWL DL conformance |
 | [ux-sme](.claude/agents/ux-sme.md) | Workflows, cognitive load, expert/novice mode handling |
@@ -52,7 +53,7 @@ Two kinds of agents:
 Shared agent contract:
 - Output envelope: `{"outputs": {...}}`. No prose outside the JSON.
 - Structured failure: `{"outputs": {"error": "<slug>", ...}}` with a truthy slug string. Triggers a CPS veto and `status=blocked`.
-- `required_outputs:` in the agent's frontmatter declares keys that MUST be present on success (e.g., `[findings, summary, recommendation]`). CPS vetoes if any are missing.
+- `required_outputs:` in the agent's frontmatter declares keys that MUST be present on success. Two syntaxes are supported: flat list (e.g., `required_outputs: [findings, summary, recommendation]`) for single-mode agents, and per-mode dict (e.g., `required_outputs:\n  review: [findings, ...]\n  ratification: [ruling, ...]`) for multi-mode agents like the `architect`. Multi-mode agents require `inputs.mode` on the task; CPS picks the correct list at check time.
 - Upstream task outputs arrive via the prompt's `UPSTREAM` block (keyed by predecessor @id). Worker agents MUST NOT read `state.jsonld` — the orchestrator inlines the data they need.
 - Tools per agent's frontmatter. No agent has `Edit` or `Write` — file mutations route through the `applier` system agent, which records the diff in the audit trail.
 
@@ -79,7 +80,7 @@ These phrases govern MY conversational behavior in this chat — they are NOT th
 
 **Validation.** Two tracks, by scope of change:
 
-- **Barcode orchestrator** (Python): `python -m unittest discover tests` from the project root. The suite covers routing, the output extractor, CPS (null + structured error + required-keys + ADR-citation registry + awaiting-decision shape), audit-trail hashing, upstream resolution, in-progress reconciliation + daemon lock, the applier system agent, and the state_admin operator CLI (reset / abandon / append / verify / status / resolve / bank). Every daemon change MUST keep the suite green.
+- **Barcode orchestrator** (Python): `python -m unittest discover tests` from the project root. The suite covers routing, the output extractor, CPS (null + structured error + required-keys + multi-mode required-keys + ADR-citation registry + awaiting-decision shape + reconnaissance/architect ratification contracts), audit-trail hashing, upstream resolution, in-progress reconciliation + daemon lock, the applier system agent, the ADR-012 ghost fixture (FNSR Spec 06), and the state_admin operator CLI (reset / abandon / append / verify / status / resolve / bank / transition-banking / phase-boundary / forward-track create / forward-track inherit). Every daemon change MUST keep the suite green.
 - **Subject project**: each project defines its own validation commands. Check `./project/CLAUDE.md`, `./project/SPEC.md`, or the project's README for the expected build/test invocations. Do not invent test commands — read them from the project's own contract.
 
 **Brevity.** Provide the "what" and the "how." Explain "why" only when asked.
@@ -160,15 +161,121 @@ python state_admin.py resolve <task-id> <option-index> [--note "..."]
 
 Resolution appends an `operator_resolution` audit entry (chain-hashed), annotates `outputs.operator_resolution = {option_index, option_text, note}`, and sets `status=done` so downstream tasks become routable.
 
-## 7.7 Forward-Track Banking
+## 7.7 Banking Lifecycle (FNSR Spec 05)
 
-When the operator notices a methodology insight, recurring pattern, or risk that's worth preserving but does NOT belong as a normal task or ADR, they bank it as a `forward_track` history entry against an anchor task:
+The operator banks methodology insights, recurring patterns, disciplines observed, risks, and other operational intelligence as **banking events** anchored to a task:
 
 ```
-python state_admin.py bank <anchor-task-id> --class {methodology|pattern|risk|insight} --content "..." [--cycle N]
+python state_admin.py bank <anchor-task-id> --content "..." \
+    [--category {methodology-refinement-candidate|pattern-observation|discipline-correction|contingency-operationalization|discipline-state-transition-observation}] \
+    [--state {1|2|3}] [--cycle <cycle-id>]
 ```
 
-This appends a `forward_track` event (chain-hashed) with `candidate_class`, `content`, and optional `surfacing_cycle`. The audit trail accumulates these without polluting the task graph. They surface during retrospective sweeps and feed future template/PLAYBOOK updates.
+Per FNSR Protocol Spec 05, bankings have a **three-state lifecycle**:
+
+- **State 1 (verbal-pending)**: banked at a cycle; not yet captured in a committed artifact. Default for new bankings.
+- **State 2 (partially-committed)**: banking captured in committed routing-artifact text; not yet formalized.
+- **State 3 (formalized)**: banking has a numbered entry in the canonical authoring-discipline document; phase-exit doc-pass has folded it in.
+
+The substrate is **neutral about implicit vs explicit lifecycle operation**:
+
+- **Implicit mode** (matches Logic Team's practice): bank with default state 1; never emit transition events; reconcile at phase-exit doc-pass. Counting views may diverge (architect-strict vs SME-inclusive); the divergence carries discipline-state-transition information.
+- **Explicit mode**: run `state_admin transition-banking <banking-id> --to-state N --reason "..." [--trigger ...]` to emit a `banking_state_transition` audit event whenever the banking moves between states.
+
+Both modes are first-class. The substrate provides the apparatus; the subject project picks the operating mode.
+
+### v2.6.0 backward compatibility
+
+v2.6.0's `bank` emitted `event=forward_track` with a `candidate_class` payload (pattern | risk | methodology | decision | other). v2.7.0+ emits `event=banking` with the Spec 05 audit event structure. The `--candidate-class` flag remains accepted; legacy values are mapped to their closest Spec 05 categories. Existing v2.6.0 audit events stay in the chain (append-only) and are read as legacy bankings; no migration; no phantom transition events backfilled.
+
+## 7.8 Pass 2a Sequencing (FNSR Spec 03)
+
+Per FNSR Protocol Spec 03, changes that mutate canonical state pass through a two-pass discipline:
+
+- **Pass 2a (ratification)**: an architect agent reviews a proposed change against frozen contracts, prior rulings, and UPSTREAM reconnaissance evidence. Produces a ruling payload. **No state mutation.**
+- **Pass 2b (commit-finalize)**: lands in v2.8.0 with verification-ritual gating. In v2.7.0 interim, the operator manually queues an existing-applier-path task to land the change.
+
+### Task-type chains
+
+Substantive changes (changes to defined terms, ADR text, constraint clauses, normative `shall`/`must` language):
+
+```
+reconnaissance → ratification → operator-applier (v2.7.0)
+                              → commit-finalize  (v2.8.0+)
+```
+
+Editorial-correction chain (typo fixes, formatting consistency, terminology tightening that preserves semantics, citation format updates):
+
+```
+ratification → operator-applier
+```
+
+Brief-confirmation chain (follow-up for amendments to prior ratified changes):
+
+```
+operator-applier (brief_confirmation: true; depends_on: prior ratification)
+```
+
+### Reconnaissance contract
+
+The `reconnaissance` agent is **read-only by contract** (`tools: Read, Grep, Glob`; no Edit, Write, Bash). Its output is `findings`, `summary`, `evidence_paths` — observations grounded in file paths and line ranges. It does not propose changes. First instance of the read-only-by-contract agent pattern; future agents needing narrow scope draw on its shape.
+
+### Architect refusal contract
+
+The architect agent in `ratification` mode walks UPSTREAM for an entry where `agent == "reconnaissance"`. For substantive changes, if reconnaissance is absent, the architect MUST refuse with `ruling: denied, rationale: reconnaissance_required`. The editorial-vs-substantive classification is LLM-judged at the boundary; the `editorial_verdict_reason` field surfaces the LLM's reasoning for operator audit.
+
+### Ratification ruling payload
+
+A ratification task's `outputs` MUST include six fields: `ruling`, `editorial_verdict`, `editorial_verdict_reason`, `rationale`, `referenced_evidence`, `bankings`. **Empty bankings list (`bankings: []`) is acceptable**; omission is not.
+
+## 7.9 Phase Boundaries and the Forward-Track Surface (FNSR Spec 07)
+
+Per FNSR Protocol Spec 07, **forward-tracks** record COMMITMENTS TO FUTURE DELIBERATION on specific items — structurally distinct from bankings (which record observations ABOUT the protocol). Forward-tracks have a candidate → deliberated-at-named-cycle → resolved lifecycle and stratify by **audience** (consumer-facing closure-path tracking vs internal-methodology-refinement queue).
+
+### Phase boundaries
+
+Phases are subject-project concepts, not substrate primitives. The operator declares a phase boundary as a first-class audit event:
+
+```
+python state_admin.py phase-boundary <from> <to> --anchor-task <task-id> \
+    [--cycle <cycle-id>] [--notes "..."]
+```
+
+This emits a `phase_boundary_declared` event. The substrate doesn't know what "phase" means — that's the subject project's discipline.
+
+### Forward-track create
+
+```
+python state_admin.py forward-track create --anchor-task <task-id> \
+    --sub-surface {consumer-closure-path|internal-methodology-refinement} \
+    --subject-type {banking|fixture|capability|candidacy|other} \
+    --subject-id <id> --description "..." \
+    --deliberation-cycle <cycle-id> --phase-origin <phase-id>
+```
+
+Creates a Spec 07 forward-track in State A (candidate). Event payload matches Spec 07 §"Audit event structure for forward-tracks" exactly, including fields not yet operated on in v2.7.0.
+
+### Forward-track inherit
+
+```
+python state_admin.py forward-track inherit \
+    --from-phase <id> --to-phase <id> --inherited-at-cycle <cycle-id>
+```
+
+Walks every Spec 07 forward-track event; for unresolved forward-tracks (state A or B) whose current phase context matches `--from-phase`, emits a `forward_track_phase_inheritance` event on the same anchor task. Pair with `phase-boundary` for phase-transition workflows.
+
+### v2.7.0 forward-track scope
+
+Ship in v2.7.0: `create` + `inherit` (enabling primitives). Defer to v2.8.0: `transition` (advance state), `list` (query), `aging` (flag long-lived candidates) — these operate forward-tracks rather than enable them, and matched-pair scope with the v2.8.0 verification-ritual agent.
+
+## 7.10 Forward-Track vs Banking Distinction (substrate naming)
+
+The v2.6.0 `bank` command emitted `event=forward_track` with a banking-shaped payload — a naming conflation that Spec 05 vs Spec 07 separation now exposes. v2.7.0+ corrects this:
+
+| Concept | v2.6.0 event_type | v2.7.0+ event_type | Notes |
+|---|---|---|---|
+| Banking (observation ABOUT the protocol) | `forward_track` (misnamed) | `banking` | Per Spec 05. Existing v2.6.0 events remain in the chain and are read as legacy bankings. |
+| Forward-track (commitment to FUTURE deliberation) | (did not exist) | `forward_track` | Per Spec 07. New in v2.7.0; payload has `forward_track_id` field which legacy banking events do not. |
 
 ## 8. The Kickoff Ritual
 
@@ -252,7 +359,7 @@ Subject-specific layer boundaries, validation commands, language conventions, an
 | File | Purpose |
 |---|---|
 | [fnsr_daemon.py](fnsr_daemon.py) | The orchestrator — single-file Python stdlib. |
-| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation (reset / abandon / append-tasks / verify / status / resolve / bank). `status` surfaces any `awaiting_operator_decision` tasks at the top. `resolve` closes an awaiting task by selecting an option index. `bank` records a forward-track methodology/pattern/risk insight against an anchor task. Run `python state_admin.py --help`. |
+| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation. v2.6.0 subcommands: `reset`, `abandon`, `append-tasks`, `verify`, `status`, `resolve`, `bank`. v2.7.0 subcommands: `transition-banking` (Spec 05 state transitions), `phase-boundary` (operator-emitted phase boundary), `forward-track create` and `forward-track inherit` (Spec 07 forward-track surface). `status` surfaces `awaiting_operator_decision` tasks at the top. v2.7.0's `bank` accepts `--category` (Spec 05) and `--state`; v2.6.0's `--candidate-class` flag remains accepted. Run `python state_admin.py --help`. |
 | [state.jsonld](state.jsonld) | JSON-LD work queue with hash-chained audit trail. Ships with the kickoff ritual pre-loaded. |
 | `state.jsonld.lock` | OS-level lock for state I/O (auto-created, gitignored). |
 | `fnsr.pid` | OS-level daemon-instance lock (auto-created, gitignored). |
