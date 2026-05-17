@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.8.0-alpha.2 — Verification ritual Checkpoint 2: Cat 8 hybrid + Cat 10 hook framework + miss taxonomy
+
+Second checkpoint of v2.8.0. Builds on alpha.1 foundation with three substrate changes (Gaps F, G, H adjudicated by Aaron post-CP1) plus Cat 8 / Cat 10 implementation per the spec bundle. Cat 9 LLM judge + new_candidacies operator-decision routing land in CP3.
+
+### Added
+- **`PredicateMetadata` dataclass** (Gap H). All Cat 1–7 (+ Cat 8) predicate signatures refactored to `(artifact, canonical_sources, metadata)`. The dataclass carries substrate-supplied context (`self_path`, `task_id`, `cycle_id`, `phase_context`, `cadence`); fields are optional and grow additively. Cat 7's `self_path` lookup migrated from the `canonical_sources["_artifact_self_path"]` namespace abuse into `metadata.self_path`. Backward-compatible fallback in the orchestrator for any predicate still on the legacy 2-arg signature (sunset at v2.8.0 final).
+- **Three-class miss taxonomy** (Gap G). `per_category_result` miss entries now carry an `evidence.miss_class` field:
+  - `malformed_spec` — category spec file invalid (no frontmatter, missing `category_id`, read failure). Emitted instead of silent-skip per Aaron's audit-trail-honesty adjudication.
+  - `unresolved_predicate` — spec valid but predicate doesn't resolve (substrate default missing, subject-project hook missing/failed-to-import, or required canonical source absent — bucketed here in CP2 with details.reason discrimination; Gap I observation for post-CP2 if 4th class warrants splitting).
+  - `categorical_coverage_miss` — spec ran and predicate emitted miss because the case falls in known-uncovered territory (Cat 9 / Cat 10 candidacy surfacing class; phase-exit-retro deliberable).
+  Constants exposed: `fnsr_daemon.MISS_MALFORMED_SPEC`, `MISS_UNRESOLVED_PREDICATE`, `MISS_CATEGORICAL_COVERAGE`.
+- **Subject-project hook loader** (Gap F). Sibling `cat-NN-*.py` files alongside `cat-NN-*.md` specs are auto-imported into a per-surface sandbox namespace at `subject.<surface>.<module-name>`. Defensive: ImportError records the failure; subsequent `_resolve_predicate` calls for that name emit `unresolved_predicate` miss with `details.import_error`. The `_resolve_predicate` extension supports three qualified-name shapes:
+  - `fnsr_daemon.<func>` — substrate default
+  - `subject.<surface>.<module>` — co-located .py file; function name == module name
+  - `subject.<surface>.<module>.<func>` — explicit function name
+- **`cat-08-multi-canonical-source.md` + `cat_08_multi_canonical_source` predicate**. Hybrid two-cadence per Spec 02 §"Cat 8". Pre-routing cadence is deterministic (IRI/CURIE existence check against vendored `iri_registries`). Activation-time cadence is deterministic strict-equality OR emits `needs_llm_judgment` when the citing artifact carries a `semantic_equivalence_acceptable: {reason, scope}` flag (Gap B refinement). The CP3 `verification-ritual-llm` worker agent consumes the deferred payload.
+- **`cat-10-type-field-structure.md` + `.py` stub**. Substrate scaffolding for the Cat 10 candidacy per Spec 02 §"Cat 10" + Aaron's Gap A adjudication. The shipped `.py` stub returns `status: miss, evidence.miss_class: categorical_coverage_miss, details.reason: not_implemented_for_this_subject_project`. Subject projects with type-field-structure discipline (TypeScript interfaces, Rust traits, OWL constraints) overlay this file with a real parser; the barcode-template ships the stub indefinitely.
+- **`_parse_se_acceptable` helper**. Extracts `semantic_equivalence_acceptable: {reason, scope}` from artifact text in either inline-JSON form or YAML-frontmatter-style form. The structured-flag (not bare boolean) is Aaron's Gap B refinement — operators committing to semantic equivalence write their rationale into the audit trail, mirroring `editorial_verdict_reason` from v2.7.0 architect ratification.
+- **24 new unit tests**. Full suite: 262 tests (was 238 at alpha.1).
+
+### Changed
+- Cat 1–7 predicate signatures refactored to take `metadata` as third arg. Substrate-side; predicates that didn't need self_path are unaffected. Cat 7's self_path read switched from `canonical_sources["_artifact_self_path"]` to `metadata.self_path`.
+- Orchestrator threads PredicateMetadata to each predicate; constructs it from task inputs (cycle_id, phase_context, artifact_self_path) and the cadence selector.
+- Loader sentinel pattern: malformed category spec files are returned as `{_malformed: True, _malformed_reason: "..."}` entries so the orchestrator can emit explicit malformed_spec misses.
+- Overall_status logic extended: `needs_llm_judgment` if any deterministic category emits the deferral OR any LLM-only category is queued. `pass` only when every applicable category passes.
+
+### Architecture per Aaron's CP1 adjudications
+- **Gap F (per-surface sandbox namespace)**: `subject.<surface>.<module-name>`, not flat `subject.<module>`. Future surfaces (cycle, commit, bankings) get their own namespace prefix.
+- **Gap F (defensive import-failure)**: ImportError doesn't crash the agent; surfaces as `unresolved_predicate` miss with `details.import_error`.
+- **Gap G (three classes)**: implemented as named constants. Distinguishing the four-classes-vs-three observation: missing-canonical-source is bucketed under `unresolved_predicate` with `details.reason: missing_canonical_source` in CP2. **Gap I (post-CP2 observation)**: if the missing-canonical-source case warrants its own 4th miss class, it can be split out additively without breaking existing miss-class consumers.
+- **Gap H (typed PredicateMetadata)**: dataclass over TypedDict for runtime clarity (matches existing `WorkerResult` pattern).
+- **Gap A (Cat 10 subject hook)**: shipped as stub; GraphWrite later overlays with a TS parser.
+- **Gap B (semantic_equivalence_acceptable structured)**: `{reason, scope}` not bare boolean; serves the same misclassification-surfacing role as `editorial_verdict_reason`.
+- **Gap D (two-cadence narrow scope)**: activation-time runs ONLY two-cadence categories. Cat 1–7 and Cat 10 (cadence: pre-routing) are filtered out at activation-time; only Cat 8 runs.
+
+### Open observation surfacing for v2.8.0 CP3 adjudication
+- **Gap I — missing-canonical-source as 4th miss class?** The three-class taxonomy locks cleanly except for "spec valid + predicate code resolvable + required canonical sources absent." CP2 buckets this under `unresolved_predicate` with `details.reason: missing_canonical_source`; semantically, this is "predicate inputs missing" rather than "predicate code missing." Downstream operator behavior: operator-provides-the-source (4th class flavor) vs operator-fixes-the-code (current unresolved_predicate flavor). If the distinction matters for downstream tooling, splitting it out as `MISS_MISSING_CANONICAL_SOURCE` is a small additive change with no breakage. Flagging for adjudication; not blocking CP3.
+
 ## v2.8.0-alpha.1 — Verification ritual Checkpoint 1: Cat 1-7 deterministic + surfaces directory
 
 First checkpoint of v2.8.0, implementing FNSR Protocol Spec 02 in stages per the four-checkpoint plan. Ships the foundation: the `surfaces/` directory layout, category-spec loader, seven deterministic category predicates (Cat 1–7), and the `verification-ritual` system agent orchestrator. Cat 8 hybrid + Cat 10 hook framework + two-cadence handling land in CP2 (v2.8.0-alpha.2). LLM-required Cat 9 + adversarial-critic second-pass land in CP3.
