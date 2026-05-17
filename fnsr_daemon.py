@@ -678,9 +678,147 @@ def _mojibake_repair(task: dict[str, Any],
     }, "", "")
 
 
+_ADR_NUMBER_RE = re.compile(r"^## ADR-(\d+):", re.MULTILINE)
+
+
+def _question_resolver(task: dict[str, Any],
+                       upstream: dict[str, Any]) -> "WorkerResult":
+    """
+    System agent: take a synthesist's outstanding_questions and operator-
+    provided structured answers, draft proper ADR entries for DECISIONS.md.
+
+    Eliminates the manual operator step of "write the dev's instruction to
+    encode these decisions as ADRs." Deterministic Python template fill.
+
+    Inputs schema:
+      source_task      : str   <- @id of synthesist task whose outputs
+                                   contain `outstanding_questions: [...]`
+      answers          : list  <- one entry per question, in the same
+                                   order as outstanding_questions. Each
+                                   entry is either:
+                                     None  -> defer this question (skipped)
+                                     dict  -> {title, decision, context,
+                                              consequences: [list]}
+      decisions_path   : str?  <- default "project/DECISIONS.md"
+
+    Output: changes[] with a single full-file replacement appending all
+    drafted ADRs to the end of DECISIONS.md. ADR numbers auto-discover
+    from existing `## ADR-NNN:` headers (next = max + 1).
+    """
+    log.info("dispatch task=%s system_agent=question-resolver", task["@id"])
+    inputs = task.get("inputs") or {}
+    source_id = inputs.get("source_task")
+    answers = inputs.get("answers")
+    decisions_path = inputs.get("decisions_path", "project/DECISIONS.md")
+
+    if not source_id:
+        return WorkerResult(True,
+                            {"error": "missing_source_task",
+                             "needed": ["inputs.source_task"]},
+                            "", "")
+    if not isinstance(answers, list):
+        return WorkerResult(True,
+                            {"error": "answers_must_be_list",
+                             "needed": ["inputs.answers as list "
+                                        "(one entry per outstanding question, "
+                                        "None to defer)"]},
+                            "", "")
+
+    source = upstream.get(source_id)
+    if not isinstance(source, dict):
+        return WorkerResult(True,
+                            {"error": "source_not_in_upstream",
+                             "source_task": source_id},
+                            "", "")
+    questions = source.get("outstanding_questions")
+    if not isinstance(questions, list):
+        return WorkerResult(True,
+                            {"error": "source_has_no_outstanding_questions",
+                             "source_task": source_id},
+                            "", "")
+
+    decisions_file = Path(decisions_path)
+    if not decisions_file.exists():
+        return WorkerResult(True,
+                            {"error": "decisions_file_not_found",
+                             "path": decisions_path},
+                            "", "")
+    # Read preserving BOM (so before-snippet matches what the applier reads).
+    decisions_text = decisions_file.read_text(encoding="utf-8")
+
+    adr_nums = [int(m.group(1)) for m in _ADR_NUMBER_RE.finditer(decisions_text)]
+    next_n = (max(adr_nums) + 1) if adr_nums else 1
+
+    date_str = time.strftime("%Y-%m-%d", time.gmtime())
+    adr_blocks: list[str] = []
+    encoded = 0
+    deferred = 0
+    for i, answer in enumerate(answers):
+        if answer is None:
+            deferred += 1
+            continue
+        if not isinstance(answer, dict):
+            return WorkerResult(True,
+                                {"error": "malformed_answer", "index": i,
+                                 "hint": "each answer must be a dict or None"},
+                                "", "")
+        required = {"title", "decision", "context"}
+        missing = [k for k in required if k not in answer]
+        if missing:
+            return WorkerResult(True,
+                                {"error": "answer_missing_fields",
+                                 "index": i, "missing": missing},
+                                "", "")
+        consequences = answer.get("consequences", [])
+        if not isinstance(consequences, list):
+            return WorkerResult(True,
+                                {"error": "consequences_must_be_list",
+                                 "index": i},
+                                "", "")
+        cons_lines = ("\n".join(f"- {c}" for c in consequences)
+                      if consequences else "- (none specified)")
+        adr_block = (
+            f"## ADR-{next_n + encoded:03d}: {answer['title']}\n\n"
+            f"**Date:** {date_str}\n\n"
+            f"**Decision:** {answer['decision']}\n\n"
+            f"**Context:** {answer['context']}\n\n"
+            f"**Consequences:**\n{cons_lines}\n\n"
+            f"---\n"
+        )
+        adr_blocks.append(adr_block)
+        encoded += 1
+
+    if not adr_blocks:
+        return WorkerResult(True,
+                            {"error": "no_answers_provided",
+                             "deferred": deferred,
+                             "hint": "answers list contained only None / "
+                                     "deferrals"},
+                            "", "")
+
+    new_content = decisions_text + "\n" + "\n".join(adr_blocks)
+    last_adr = next_n + encoded - 1
+
+    return WorkerResult(True, {
+        "changes": [{
+            "id": "C1",
+            "file": decisions_path,
+            "rationale": (f"Append {encoded} ADR(s) for operator-answered "
+                          f"outstanding questions from {source_id}"),
+            "before": decisions_text,
+            "after": new_content,
+            "scope": "broad",
+        }],
+        "summary": (f"drafted {encoded} ADR(s) (ADR-{next_n:03d} through "
+                    f"ADR-{last_adr:03d}); {deferred} question(s) deferred"),
+        "self_assessment": "confident" if deferred == 0 else "uncertain",
+    }, "", "")
+
+
 SYSTEM_AGENTS = {
     "applier": _apply_changes,
     "mojibake-repair": _mojibake_repair,
+    "question-resolver": _question_resolver,
 }
 
 

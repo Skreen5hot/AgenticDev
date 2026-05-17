@@ -47,6 +47,7 @@ Two kinds of agents:
 |---|---|
 | [applier](.claude/agents/applier.md) | Applies a developer / planner agent's `changes[]` to the filesystem with strict `before`-snippet matching, multi-change atomic apply, and UTF-8 BOM on new files |
 | [mojibake-repair](.claude/agents/mojibake-repair.md) | Cleans known cp1252-UTF8 mojibake patterns (`Â§` → `§`, `â€"` → `—`, etc.) from upstream `changes[]` before they reach the applier |
+| [question-resolver](.claude/agents/question-resolver.md) | Takes synthesist `outstanding_questions` + operator structured answers, drafts ADR entries (matching ADR-001 format) for DECISIONS.md |
 
 Shared agent contract:
 - Output envelope: `{"outputs": {...}}`. No prose outside the JSON.
@@ -194,11 +195,13 @@ Subject-specific layer boundaries, validation commands, language conventions, an
 | File | Purpose |
 |---|---|
 | [fnsr_daemon.py](fnsr_daemon.py) | The orchestrator — single-file Python stdlib. |
-| [state.jsonld](state.jsonld) | JSON-LD work queue with hash-chained audit trail. Ships empty. |
+| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation (reset / abandon / append-tasks / verify / status). Run `python state_admin.py --help`. |
+| [state.jsonld](state.jsonld) | JSON-LD work queue with hash-chained audit trail. Ships with the kickoff ritual pre-loaded. |
 | `state.jsonld.lock` | OS-level lock for state I/O (auto-created, gitignored). |
 | `fnsr.pid` | OS-level daemon-instance lock (auto-created, gitignored). |
 | [.claude/agents/](.claude/agents/) | Agent contracts (worker + system) with frontmatter + body. |
 | [tests/](tests/) | Python `unittest` suite. Run `python -m unittest discover tests`. |
+| [PLAYBOOK.md](PLAYBOOK.md) | Operator playbook: failure-mode recognition + recovery patterns from real-world runs. Read this when a chain stalls. |
 | `./project/` | Subject project root (operator-populated). |
 
 ---

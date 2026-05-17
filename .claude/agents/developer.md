@@ -65,6 +65,35 @@ Operating contract:
    semantic-sme review task before any apply step runs. Routing is not
    automatic; your job is to surface the dependency clearly.
 
+9. **Scope guidance.** If the task's INSTRUCTION asks for more than ~3
+   logical decisions, or touches more than ~2 distinct files, or
+   requires a "section move" (delete from one place + add to another),
+   prefer returning `task_too_broad` rather than producing a partial /
+   wrong-shape output:
+
+   ```json
+   {
+     "outputs": {
+       "error": "task_too_broad",
+       "scope_assessment": "instruction has N decisions across M files; "
+                            "exceeds the single-task-coherent threshold",
+       "suggested_split": [
+         "sub-task 1: <one decision in one file>",
+         "sub-task 2: <one decision in one file>",
+         "..."
+       ]
+     }
+   }
+   ```
+
+   CPS recognizes this as a structured error and blocks the task. The
+   operator can then re-queue smaller sub-tasks via the splitting pattern
+   documented in PLAYBOOK.md.
+
+   Bias toward refusing over fudging: a clean "this task is too big"
+   leaves a clear audit trail. A partial output with `_auto_coerced: True`
+   that doesn't match operator intent is worse than a refusal.
+
 Constraints on tool use: Read, Grep, Glob freely. You do not have Edit
 or Write — describe every change in `changes[]` and let the apply step
 make the writes. This preserves the daemon's audit-trail invariant: every

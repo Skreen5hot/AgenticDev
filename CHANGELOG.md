@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.5.0 — Operator playbook, state_admin CLI, question-resolver agent, developer task-scope heuristic
+
+Minor release packaging the operational lessons from a full real-world kickoff session. The patches in v2.0–v2.4.2 hardened the daemon against specific failure modes; v2.5.0 hardens the operator experience around them. Four pieces:
+
+### Added
+- **`PLAYBOOK.md`** — operator playbook documenting failure-mode recognition (every daemon error message we observed in production runs) and recovery patterns. Sections: failure modes from the daemon log, failure modes from agent outputs, dispatch-time anomalies, operator task-splitting workflow, mojibake cleanup patterns, audit-trail inspection, when to manually edit state.jsonld, cross-platform gotchas. ~600 lines.
+- **`state_admin.py`** — operator CLI for state.jsonld manipulation. Replaces the ad-hoc one-off Python scripts operators wrote during the kickoff session. Subcommands:
+  - `reset <task_id> --reason "..."` — reset a task to ready, clear attempts and outputs, audit-log the reset
+  - `abandon <task_id> --reason "..." [--replaced-by id1,id2]` — mark a task blocked when its scope is being replaced
+  - `append-tasks <json-file>` — append new tasks from JSON file (skips duplicates)
+  - `verify [--quiet]` — re-derive every audit entry's `chain_hash` and report integrity
+  - `status [--filter STATUS]` — print task statuses
+- **`question-resolver` system agent** — takes a synthesist's `outstanding_questions` plus operator-provided structured answers and drafts proper ADR-NNN entries (auto-numbered, ADR-001 format) for DECISIONS.md. Closes the manual operator-typing gap exposed by the kickoff: synthesist produces questions, operator must answer them, but actually drafting the ADR text was hand-work every time. Deterministic — no LLM in the path so operator intent is preserved exactly.
+- **Developer agent task-scope heuristic** — when an instruction asks for >3 logical decisions, touches >2 files, or requires a section-move, the developer is now advised to return `{outputs: {error: "task_too_broad", suggested_split: [...]}}` rather than producing a partial / wrong-shape output. CPS recognizes the structured error; operator splits via the playbook pattern.
+- **21 new unit tests** across `test_state_admin.py` (7) and `test_question_resolver.py` (14). Full suite: 119 tests.
+
+### Changed
+- CLAUDE.md §3 (Agent Roster) lists `question-resolver` alongside `applier` and `mojibake-repair`.
+- CLAUDE.md §11 (Key Files) adds `state_admin.py` and `PLAYBOOK.md`.
+- `developer.md` operating contract gains scope-guidance item 9.
+
+### Why a minor version (v2.5.0) instead of v2.4.3 patch
+v2.0–v2.4.2 were all daemon-internal improvements. v2.5.0 adds new operator-facing surface area (a new CLI tool, a new agent, a substantial new doc). The capability set is meaningfully larger. Backward compatible.
+
+### Operator workflow shifts
+- Use `python state_admin.py reset/abandon` instead of writing one-off `_split_*.py` scripts.
+- When the synthesist surfaces outstanding questions, write structured answers as a YAML/JSON file and queue a `question-resolver` task instead of writing developer-task instructions by hand.
+- When something goes sideways, check PLAYBOOK.md first.
+
 ## v2.4.2 — Developer envelope auto-coerce + API transient backoff
 
 Patch release. Closes the two recurring failure modes observed during a real-world kickoff session: developer agent dropping the `{changes:[...], summary, self_assessment}` envelope on simple tasks, and Anthropic API 5xx errors burning 3 retry attempts in 15 seconds.
