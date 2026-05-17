@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.4.2 — Developer envelope auto-coerce + API transient backoff
+
+Patch release. Closes the two recurring failure modes observed during a real-world kickoff session: developer agent dropping the `{changes:[...], summary, self_assessment}` envelope on simple tasks, and Anthropic API 5xx errors burning 3 retry attempts in 15 seconds.
+
+### Added
+- **`_coerce_developer_envelope`** — when `_extract_outputs` returns a dict that looks like a single change (has `file`, `before`, `after` keys, no `changes` array), the daemon wraps it in the proper developer envelope, sets `self_assessment: needs_review`, and flags `_auto_coerced: True` in the output. Audit-visible. Closes the "LLM forgot the wrapper" failure mode without requiring a retry.
+- **`_is_api_transient_error`** — detects `is_error:true` + `api_error_status: 5XX` in claude's JSON envelope. When found, `invoke_subagent` sleeps `FNSR_API_BACKOFF_S` seconds (default 60) before returning the failure, giving Anthropic time to recover instead of triggering immediate retries that would all hit the same outage. Configurable via env var.
+- **12 new unit tests** covering envelope coerce paths (proper envelope preserved, bare change wrapped, non-change dict pass-through, etc.) and API transient detection (5xx detected, 4xx not, whitespace-tolerant JSON parsing).
+
+### Changed
+- `invoke_subagent` integrates both improvements transparently. Existing call sites unchanged.
+- `WorkerResult` semantics unchanged. CPS check happily accepts auto-coerced outputs (they have all required keys after wrapping).
+
+### Discovery context
+v2.4.0/v2.4.1 kickoff session: developer agent emitted a single change object instead of the `{changes:[...], ...}` envelope on three separate complex-scope tasks. Operator manually split each task to ever-smaller scope before the LLM produced the right shape. v2.4.2's coerce makes this self-healing: the daemon recognizes the common LLM mistake and wraps it automatically.
+
+Same session: an Anthropic API 500 incident caused all 3 retry attempts of a developer task to fire and fail within 15 seconds (the API was down for that whole window). v2.4.2's API backoff spreads the retries over ~3 minutes instead, giving the service room to recover.
+
+### Configuration
+- `FNSR_API_BACKOFF_S` (default 60) — seconds to sleep after a detected API 5xx before returning failure to the daemon loop. Total wall-clock with 3 retries ≈ 3 × (failure time + 60s). Set to 0 to disable backoff.
+
 ## v2.4.1 — Arrow mojibake patterns
 
 Patch release. Adds three arrow-mojibake patterns to `_MOJIBAKE_PATTERNS`. The pattern set in v2.4.0 covered punctuation mojibake (em-dash, smart quotes, ellipsis) and Latin-1 supplement mojibake (`§`, `°`, etc.) but missed arrow characters whose UTF-8 third byte falls in the Unicode General Punctuation block and gets reinterpreted as a different cp1252 character.

@@ -64,6 +64,7 @@ TASK_TIMEOUT_S = int(os.environ.get("FNSR_TASK_TIMEOUT_S", "1800"))
 MAX_ATTEMPTS = int(os.environ.get("FNSR_MAX_ATTEMPTS", "3"))
 RAW_STDOUT_LOG_BYTES = int(os.environ.get("FNSR_RAW_STDOUT_BYTES", "4000"))
 DAEMON_PID_PATH = Path(os.environ.get("FNSR_PID", "./fnsr.pid"))
+API_BACKOFF_S = int(os.environ.get("FNSR_API_BACKOFF_S", "60"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -311,16 +312,67 @@ def invoke_subagent(agent_name: str, task: dict[str, Any],
                             f"subprocess could not start: {e}", "")
 
     if proc.returncode != 0:
+        if _is_api_transient_error(proc.stdout):
+            log.warning("api transient error for task=%s; sleeping %ds before "
+                        "returning failure", task["@id"], API_BACKOFF_S)
+            time.sleep(API_BACKOFF_S)
         return WorkerResult(False, None,
                             (proc.stderr or "")[:2000],
                             proc.stdout)
 
     outputs = _extract_outputs(proc.stdout)
     if outputs is None:
+        if _is_api_transient_error(proc.stdout):
+            log.warning("api transient error for task=%s; sleeping %ds before "
+                        "returning failure", task["@id"], API_BACKOFF_S)
+            time.sleep(API_BACKOFF_S)
         return WorkerResult(False, None,
                             "no JSON object found in stdout",
                             proc.stdout)
+    outputs = _coerce_developer_envelope(outputs, task["@id"])
     return WorkerResult(True, outputs, proc.stderr, proc.stdout)
+
+
+_API_TRANSIENT_RE = re.compile(
+    r'"is_error"\s*:\s*true.*?"api_error_status"\s*:\s*5\d\d',
+    re.DOTALL,
+)
+
+
+def _is_api_transient_error(stdout: str) -> bool:
+    """Detect Anthropic API 5xx errors in claude's JSON envelope. These are
+    transient external failures; the daemon sleeps before letting the next
+    retry attempt fire, so Anthropic gets time to recover instead of us
+    burning all our retries in a 15-second window."""
+    if not stdout:
+        return False
+    return bool(_API_TRANSIENT_RE.search(stdout))
+
+
+def _coerce_developer_envelope(outputs: Any, task_id: str) -> Any:
+    """Auto-coerce a bare-change-shape dict to the developer envelope. The
+    developer / planner agent's contract is `{changes: [...], summary,
+    self_assessment}`. LLMs occasionally drop the wrapper on simple tasks
+    and return a single change-shape dict at the top level. Rather than
+    fail the CPS required-keys check and burn an attempt, the daemon
+    auto-wraps a recognizable single-change dict and marks the result
+    `_auto_coerced: True` so operators can audit."""
+    if not isinstance(outputs, dict):
+        return outputs
+    if "changes" in outputs:
+        return outputs
+    # Heuristic: looks like a single change object?
+    change_keys = {"file", "before", "after"}
+    if not change_keys.issubset(outputs.keys()):
+        return outputs
+    log.info("auto-coerced bare change dict to envelope for task=%s", task_id)
+    return {
+        "changes": [outputs],
+        "summary": "auto-coerced from bare change object emitted by agent; "
+                   "operator should review intent",
+        "self_assessment": "needs_review",
+        "_auto_coerced": True,
+    }
 
 
 # ---------- System agents (deterministic, local Python) -----------------
