@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.6.1 — ADR-012 ghost test fixture (Spec 06 anchor for v2.7.0+ Cat 9)
+
+Patch release. Adds the canonical ADR-citation mismatch fixture (the "ADR-012 ghost") from FNSR Protocol Spec 06 as a regression-locked test class in `tests/test_adr_and_awaiting.py`. No daemon behavior change.
+
+### Added
+- **`TestAdr012GhostFixture`** in `tests/test_adr_and_awaiting.py` — five tests that lock in v2.6.0's correct existence-check-passes-on-ghost behavior:
+  - `test_registry_recognizes_adr_012` — precondition: ADR-012 is registered in DECISIONS.md.
+  - `test_v260_passes_ghost_citation_in_canonical_doc` — ghost framing in `project/SPEC.md` passes; structural existence is satisfied.
+  - `test_v260_passes_ghost_citation_in_decisions_destination` — same passing behavior when the ghost lands in DECISIONS.md itself.
+  - `test_v260_passes_ghost_citation_in_arc_prefix` — same passing behavior when the ghost lands under `arc/` (canonical-by-prefix).
+  - `test_v260_vetoes_companion_unregistered_adr_in_same_payload` — when the ghost (ADR-012, registered) is mixed with a genuinely missing ADR (ADR-099) in the same `after`, the missing one vetoes; the ghost passes (i.e., ADR-012 does NOT appear in the veto message).
+- Full suite: 156 tests (was 151; +5).
+
+### Why a patch
+v2.6.0's CPS check (Cat 2 per FNSR Spec 02 — ADR cross-reference existence) is correct as far as it goes. The ghost case structurally passes existence and fails only at cited-content consistency (Cat 9 candidacy per FNSR Spec 02), which is v2.7.0+ work. This fixture documents the v2.6.0 → v2.7.0+ coverage progression in code: the same architect output that passes v2.6.0 will veto under Cat 9 in v2.7.0+. No state-mutation contract changes; the daemon ships unchanged.
+
+### Provenance
+- `project/Routing/06-adr-citation-mismatch-fixture.md` (FNSR Protocol Spec 06; Logic Team Input 2; Q-4-Step5-A architect ruling 2026-05-14)
+- Spec 06's pseudocode in §"Test Fixture Structure" referenced an aspirational `cps_adr_citation_check` helper; the canonical artifact is the test written against the real v2.6.0 function `_check_adr_citations(proposed_outputs, decisions_path)`.
+
 ## v2.6.0 — ADR-citation CPS check, awaiting_operator_decision handoff, forward-track banking
 
 Minor release adding three operator-protocol surfaces driven by lessons from the GraphWrite kickoff session. Where v2.5.0 hardened the operator's *recovery* tools (PLAYBOOK, state_admin reset/abandon, question-resolver), v2.6.0 hardens the operator's *handoff* and *insight-preservation* surfaces. Four pieces:
