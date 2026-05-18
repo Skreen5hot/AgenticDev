@@ -34,7 +34,7 @@ Two kinds of agents:
 |---|---|
 | [spec-reviewer](.claude/agents/spec-reviewer.md) | Structural, ontological, conformance review of specifications |
 | [adversarial-critic](.claude/agents/adversarial-critic.md) | Confirm / refute / extend an upstream reviewer's findings |
-| [synthesist](.claude/agents/synthesist.md) | Reconcile a reviewer + critic into a single decision document |
+| [synthesist](.claude/agents/synthesist.md) | Two modes (`default_mode: classic`): `classic` (existing v2.5.0 reviewer+critic reconciliation) and `generalized` (new in v3.0-alpha.1; N-stream synthesis as a **Bounded-Authority Orchestrator (BAO)** instance over the synthesis surface — first concrete BAO instance per [surfaces/_primitives/bounded-authority-orchestrator.md](surfaces/_primitives/bounded-authority-orchestrator.md)). |
 | [planner](.claude/agents/planner.md) | Author strategic ROADMAP or tactical IMPLEMENTATION_PLAN from a SPEC (mode-switched) |
 | [architect](.claude/agents/architect.md) | Two modes (selected via `inputs.mode`): `review` (structural findings + recommendations) and `ratification` (Pass 2a ruling per FNSR Spec 03; six-field ruling payload + refusal contract) |
 | [reconnaissance](.claude/agents/reconnaissance.md) | **Read-only-by-contract.** Gathers findings/evidence about the subject project's current state; produces no proposals, no recommendations. First instance of the read-only-by-contract agent pattern (FNSR Spec 03 reconnaissance requirement for substantive changes). |

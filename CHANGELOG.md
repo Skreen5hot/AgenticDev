@@ -4,6 +4,73 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.0-alpha.1 — First checkpoint of v3.0: BAO pattern formalization + generalized synthesist + retro surface foundation
+
+First checkpoint of v3.0 per the MAREP-on-Barcode integration spec (`ariadne/archive/specs/MAREP-v2.2/MAREP_INTEGRATION_SPEC.md` §17). Establishes the foundation for v3.0's two architectural moves: deliberative reflection (MAREP retros) operating alongside evidence-gated change (v2.8.0's Pass 2a/2b chain), and the **Bounded-Authority Orchestrator (BAO) substrate primitive** as a reusable pattern for elevated-authority LLM agents.
+
+24 new tests; full suite 369 (was 345 at v2.9.0). Three CP1 deliverables shipped as one bundle (the deliverables are interdependent — BAO doc is referenced by synthesist + retro surface; retro surface references both).
+
+### Added
+
+- **BAO substrate primitive doc** at [surfaces/_primitives/bounded-authority-orchestrator.md](surfaces/_primitives/bounded-authority-orchestrator.md). Specifies the four bounding properties every BAO instance MUST satisfy:
+  1. Surface scope (elevated authority limited to assigned surface)
+  2. Substrate enforcement (CPS + permitted_sections + anti-pattern detection apply)
+  3. Audit-chain visibility (every decision lands in chain via normal dispatch)
+  4. No substrate-level privilege (worker agent; cannot bypass dispatch/lock/state)
+
+  Per Aaron's CP3 adjudication, the four bounds are non-negotiable; readings of "bounded-authority" that omit any of them risk under-specifying the contract. The primitive doc is the substrate's canonical reference; future BAO instances cite it.
+
+  New directory `surfaces/_primitives/` for substrate-primitive documentation (cross-surface patterns; distinct from surface-specific specs under `surfaces/<surface>/`).
+
+- **`surfaces/retro/` foundation** — second explicit surface registered under `surfaces/` (after `verification/` in v2.8.0). Contains:
+  - `surface-spec.md` documenting the retro-surface generalized layer + sub-surface relationship to FNSR Spec 07 forward-tracks
+  - 5 role binding stubs under `agents/`: `@Orchestrator` (BAO; full agent in v3.0-alpha.2), `@Architect`, `@Developer`, `@UserAdvocate`, `@Skeptic` (existing substrate agents mapped to retro roles)
+  - 6 phase spec stubs under `phases/`: Independent Gathering through Final Compression per MAREP v2.2 §12
+  - Three new analytical agents (`@QA`, `@DeliveryManager`, `@RiskAnalyst`) land in v3.0-alpha.2
+
+- **`generalized` mode added to synthesist** (`.claude/agents/synthesist.md`). The **first concrete BAO instance**. Reconciles N parallel input streams over the synthesis surface (vs the existing two-stream `classic` reviewer+critic synthesis). New required_outputs: `synthesized_findings`, `conflicts`, `recommendation`, `source_provenance`, `summary`. Cross-surface proposals surfaced via `cross_surface_proposals[]` field — does NOT mutate other surfaces directly (BAO bound #1).
+
+  `classic` mode preserved as `default_mode` for back-compat with existing v2.5.0+ dispatch tasks. Multi-mode `required_outputs` mechanism (v2.7.0+) + `default_mode` field (v2.8.0-alpha.3) make the extension additive.
+
+- **Daemon-side retro-surface loaders** (`fnsr_daemon.py`):
+  - `_load_retro_role_bindings(surface="retro")` parses `surfaces/<surface>/agents/<role>.md` files into role→binding dict
+  - `_load_retro_phase_specs(surface="retro")` parses `surfaces/<surface>/phases/<phase>.md` files into ordered list
+  - Both gracefully degrade when their respective directories don't exist (substrate stays back-compat with subject projects that don't use retros)
+  - Reuse the verification-surface category loader pattern unchanged — the Spec 01 surface-registry primitive's reuse-without-modification property holds
+
+- **24 new unit tests** in `tests/test_retro_surface_foundation.py`. Coverage:
+  - BAO substrate-primitive doc presence + four-bounds declaration + frontmatter
+  - Retro role bindings loader (5 expected roles; orchestrator marked as BAO; others not)
+  - Retro phase specs loader (6 phases in canonical order; entry/exit criteria present)
+  - Graceful degradation when directory absent
+  - Multi-mode synthesist (classic default + generalized + CPS enforcement of both modes' required_outputs)
+  - Cross-instance BAO bounds validation: every agent declaring `bao_pattern: true` MUST have `bao_surface`, `contract_class: read-only`, read-only tools (no Edit/Write/Bash), and reference the primitive doc
+
+### Changed
+
+- `state_admin template-sync` default manifest extended with the 14 new v3.0-alpha.1 files. Verified end-to-end: v3.0-alpha.1 itself shipped using the v2.9.0 template-sync command (the substrate's own ouroboros tooling pattern, second instance).
+
+### BAO pattern instances (substrate-wide)
+
+| Instance | Surface | First shipped |
+|---|---|---|
+| Generalized synthesist | synthesis | v3.0-alpha.1 (THIS RELEASE) |
+| MAREP-Orchestrator | retro | v3.0-alpha.2 |
+| Phase-exit retro finalizer | phase-exit-deliberation | v3.0 (final) |
+| Verification-ritual-llm (cat-9-judge mode) | verification | Retroactively classified (v2.8.0; predates the named pattern but satisfies all four bounds) |
+| FNSR moral-person deliberative coordinator | (eventual deliberation surface) | future |
+
+### FNSR-relevance
+
+The BAO pattern is the substrate's answer to "normative apparatus often needs elevated-authority coordination without elevated-substrate-privilege." A naive "give the LLM permissions" approach fails because it loses one or more of the four bounds. The BAO pattern preserves all four simultaneously; the synthetic moral person project will adopt this pattern at every level where moral judgment requires coordinator-style authority over a deliberation.
+
+The retro surface establishes the second canonical surface (after verification). After v3.0 final ships, the substrate operates two complete deliberative cycles: evidence-gated change (Pass 2a/2b) and reflective deliberation (MAREP retros). Both under the same architecture pattern.
+
+### What's still pending for v3.0
+
+- **v3.0-alpha.2**: MAREP substrate primitives (retro-applier system agent; three new analytical agents `@QA`, `@DeliveryManager`, `@RiskAnalyst`; three anti-pattern CPS checks; length-budget frontmatter syntax; phase-complete-declaration operator surface)
+- **v3.0 (final)**: phase-exit retro end-to-end; `state_admin retro` subcommand family; Episodic→Semantic promotion path; final docs sweep; v3.0 tag (alpha series retires)
+
 ## v2.9.0 — Operator workflow tools: test-runner + template-sync + git-committer
 
 Lead-in release between v2.8.0 (verification-as-substrate) and v3.0 (MAREP integration + generalized synthesist + phase-exit retro). Ships three substrate-side operator workflow primitives that have been deferred since v2.7.0 planning, completing the subject-work tooling surface before v3.0's larger architectural moves.
