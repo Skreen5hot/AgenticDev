@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.8.0-alpha.3 — Verification ritual Checkpoint 3: Cat 9 LLM judge + adversarial-critic second-pass + 4th miss class
+
+Third checkpoint of v2.8.0. Adds the LLM side of the verification ritual per FNSR Spec 02 + Aaron's CP1 architectural call (two-agent split). Cat 9 (cited-content consistency) is the substrate's first non-deterministic verification category; the paired-verdict adversarial-critic second-pass mitigation makes its LLM judgment auditable rather than oracular. Plus Gap I — the fourth miss class — confirmed and split.
+
+### Added
+- **`MISS_MISSING_CANONICAL_SOURCE` 4th miss class** (Gap I post-CP2 adjudication). Each of the four miss classes has a distinct operator-fix path:
+  - `malformed_spec` — operator fixes the spec file
+  - `unresolved_predicate` — operator fixes the predicate code
+  - `missing_canonical_source` — operator provides the canonical source (NEW)
+  - `categorical_coverage_miss` — phase-exit retro deliberable territory
+  Backward-compatible additive change; CP2 consumers using `unresolved_predicate.details.reason="missing_canonical_source"` keep working but the new constant is the canonical surface going forward.
+- **`cat-09-cited-content-consistency.md` spec file**. Cat 9 candidacy per FNSR Spec 02 §"Cat 9 Candidacy". `implementation_mode: llm`; `llm_dispatcher_agent: verification-ritual-llm`; `llm_mode: cat-9-judge`; `canonical_source_keys: [spec, decisions]`. The deterministic `verification-ritual` system agent emits `status: deferred_llm` for Cat 9 entries when canonical sources are present (sets `overall_status: needs_llm_judgment`); operator queues `verification-ritual-llm` next.
+- **`verification-ritual-llm` worker agent** at [.claude/agents/verification-ritual-llm.md](.claude/agents/verification-ritual-llm.md). **Second instance of the read-only-by-contract agent pattern** (after `reconnaissance` v2.7.0). Tools: Read/Grep/Glob. Two modes via multi-mode `required_outputs`:
+  - `cat-9-judge` — judges cited-content consistency. Category-agnostic prompt template (per Aaron's CP3 observation 1): receives `citation_reference`, `citing_framing`, `canonical_content`; verdicts `consistent | inconsistent | requires_operator_decision`. Examples in the prompt include the ADR-012 ghost (ADR-registry flavor, Spec 06) AND Q-4-Step5-A Miss 1 (spec §3.4.1 flavor) as parallel cases.
+  - `cat-8-semantic-equivalence` — judges semantic equivalence for Cat 8 activation-time deferrals when the artifact carries the `semantic_equivalence_acceptable: {reason, scope}` structured flag (Gap B refinement from CP2).
+- **`adversarial-critic` agent extended with `cat-9-second-pass` mode** per FNSR Spec 02 §"Open questions" + Aaron's CP3 observation 2. **Third instance of the read-only-by-contract agent pattern.** Fires on Cat 9 **vetoes only** (verdicts that change downstream state); Cat 9 passes don't require second-pass since they don't uniquely change state. Output verdict shape: `confirm_veto | dispute_veto | extend_veto` per Cat 9 entry; overall verdict `vetoes_confirmed | vetoes_disputed | vetoes_extended`.
+- **`default_mode` frontmatter field** for multi-mode agents. Daemon parses it and uses it when `task.inputs.mode` is absent — back-compat for tasks dispatching `adversarial-critic` without explicit mode (existing CP2-and-earlier dispatches keep working under the `review-second-pass` default). Added to the multi-mode `required_outputs` parser.
+- **`state_admin forward-track create --surfacing-task-id`** (Aaron's CP3 observation 3). Optional field recording the task that surfaced a candidacy (e.g., the `verification-ritual-llm` task whose `new_candidacies` prompted the forward-track). Preserves audit-trail evidence for phase-exit-retro deliberation without requiring manual chain-walking. Backward-compatible: existing v2.7.0/v2.8.0-alpha.x forward-tracks without this field continue to work; v2.8.0 transition/list/aging will tolerate its absence.
+- **15 new unit tests**. Full suite: 278 tests (was 263 at alpha.2).
+
+### Changed
+- Orchestrator's category-loop ordering: missing-canonical-source check now runs BEFORE the LLM-deferral check. Means an LLM-only category without its required sources emits `miss_class: missing_canonical_source`, not the deferral signal. The deferral only fires when there's content to judge — preserves `overall_status: pass` semantics for runs where Cat 9 wasn't applicable to the cases at hand.
+- Cat 9 deferred-LLM entries now carry `evidence.llm_dispatcher_agent` and `evidence.llm_mode` fields so the operator's downstream task-queueing knows exactly which worker agent to dispatch with which mode.
+- `_agent_required_outputs` gains the `default_mode` semantic for back-compat with single-mode → multi-mode agent migrations.
+- CLAUDE.md §3 Agent Roster — `verification-ritual-llm` added; `adversarial-critic` row updated to document the two-mode operating contract.
+
+### Architecture: Cat 9 as FNSR-relevant precedent
+Cat 9 is where the substrate first leaves deterministic territory in a way the operator cannot unwind by reading code. Cat 1–7 deterministic predicates either pass or veto with a structural answer the operator can verify by hand. Cat 9 emits an LLM verdict that an operator can disagree with but can't re-derive deterministically.
+
+The paired-verdict adversarial-critic second-pass exists for this reason: to make Cat 9's LLM judgment **auditable against itself** rather than treating it as oracular. The pattern is **FNSR-relevant infrastructure** beyond v2.8.0 — when the synthetic moral person substrate must make normative judgments that aren't deterministic (rule-checking failures, equity assessments, novel-case interpretations), the same pattern applies:
+1. Don't pretend the LLM verdict is deterministic.
+2. Make the verdict auditable via paired-verdict machinery.
+3. Require second-pass for verdicts that change state.
+
+The `adversarial-critic.md` `cat-9-second-pass` mode is the first concrete substrate implementation of this pattern. Future FNSR work draws on its shape.
+
+### Operator workflow (v2.8.0-alpha.3 chain)
+Substantive change with Cat 9 candidate references:
+```
+verification-ritual          (deterministic Cat 1-8, 10; deferred_llm for Cat 9)
+    ↓
+verification-ritual-llm      (LLM Cat 9 judge; may emit one or more vetoes)
+    ↓ (only when ≥1 Cat 9 veto)
+adversarial-critic mode:cat-9-second-pass   (confirm/dispute/extend the veto)
+    ↓
+operator decides: honor veto or override based on adversarial-critic verdict
+```
+If `verification-ritual-llm` emits `new_candidacies` (patterns no current category covers), operator runs `state_admin forward-track create --surfacing-task-id <verification-ritual-llm task @id> --subject-type candidacy --sub-surface internal-methodology-refinement ...` to track the candidacy through phase-exit retro deliberation.
+
+### What's still pending for v2.8.0 final (CP4)
+- Forward-track operating commands: `state_admin forward-track transition`, `list`, `aging` (matched-pair scope with the v2.8.0 verification-ritual agent per Aaron's directive).
+- `commit-finalize` task type wired as Pass 2b consumer (CP3 ships only the documented surface; CP3's substrate doesn't dispatch commit-finalize anywhere specially — the v2.7.0 operator-applier interim continues until CP4 lands).
+- Final v2.8.0 docs sweep (CLAUDE.md §7.x consolidation; PLAYBOOK.md verification-ritual operator patterns).
+- v2.8.0 tag.
+
 ## v2.8.0-alpha.2 — Verification ritual Checkpoint 2: Cat 8 hybrid + Cat 10 hook framework + miss taxonomy
 
 Second checkpoint of v2.8.0. Builds on alpha.1 foundation with three substrate changes (Gaps F, G, H adjudicated by Aaron post-CP1) plus Cat 8 / Cat 10 implementation per the spec bundle. Cat 9 LLM judge + new_candidacies operator-decision routing land in CP3.

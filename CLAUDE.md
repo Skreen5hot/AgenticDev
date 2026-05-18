@@ -49,7 +49,8 @@ Two kinds of agents:
 | [applier](.claude/agents/applier.md) | Applies a developer / planner agent's `changes[]` to the filesystem with strict `before`-snippet matching, multi-change atomic apply, and UTF-8 BOM on new files |
 | [mojibake-repair](.claude/agents/mojibake-repair.md) | Cleans known cp1252-UTF8 mojibake patterns (`Â§` → `§`, `â€"` → `—`, etc.) from upstream `changes[]` before they reach the applier |
 | [question-resolver](.claude/agents/question-resolver.md) | Takes synthesist `outstanding_questions` + operator structured answers, drafts ADR entries (matching ADR-001 format) for DECISIONS.md |
-| [verification-ritual](.claude/agents/verification-ritual.md) | v2.8.0 Checkpoint 1. Orchestrates the verification ritual per FNSR Spec 02. Loads category specs from `surfaces/verification/categories/` at dispatch time; runs deterministic Cat 1–7 predicates against the path-fence-authored artifact. Cat 8 hybrid + Cat 10 hook land in CP2; Cat 9 LLM judge in CP3. |
+| [verification-ritual](.claude/agents/verification-ritual.md) | v2.8.0 Checkpoint 1. Orchestrates the verification ritual per FNSR Spec 02. Loads category specs from `surfaces/verification/categories/`; runs deterministic Cat 1–8 + Cat 10. Defers Cat 9 (LLM-required) via `overall_status: needs_llm_judgment`. |
+| [verification-ritual-llm](.claude/agents/verification-ritual-llm.md) | v2.8.0 Checkpoint 3. **Read-only-by-contract.** LLM judge for the verification ritual's LLM-required categories. Two modes: `cat-9-judge` (cited-content consistency per FNSR Spec 02 Cat 9 candidacy) and `cat-8-semantic-equivalence` (activation-time semantic-equivalence judging when `semantic_equivalence_acceptable: {reason, scope}` flag is present). Second instance of the read-only-by-contract agent pattern. |
 
 Shared agent contract:
 - Output envelope: `{"outputs": {...}}`. No prose outside the JSON.
