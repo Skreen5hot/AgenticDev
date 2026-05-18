@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.9.0 — Operator workflow tools: test-runner + template-sync + git-committer
+
+Lead-in release between v2.8.0 (verification-as-substrate) and v3.0 (MAREP integration + generalized synthesist + phase-exit retro). Ships three substrate-side operator workflow primitives that have been deferred since v2.7.0 planning, completing the subject-work tooling surface before v3.0's larger architectural moves.
+
+**51 new tests across three deliverables; full suite 345 (was 294 at v2.8.0).** Single checkpoint, single tag. The three deliverables are independent; each lands as its own commit in the release for clearer audit history.
+
+### Added
+
+- **`test-runner` system agent** ([.claude/agents/test-runner.md](.claude/agents/test-runner.md); 19 new tests). Runs the configured test suite via subprocess; returns structured `passed`/`failed`/`skipped`/`total`/`status`/`first_n_failures`/`raw_stdout_tail`/`exit_code`. Subject-project-agnostic — test command via `FNSR_TEST_RUNNER_CMD` env var or `inputs.cmd` task input. Built-in parsers: `python_unittest`, `npm`, `raw` fallback. Auto-detected from command string; explicit override via `inputs.parser`. Configurable timeout (default 300s via `FNSR_TEST_RUNNER_TIMEOUT_S`). Per the v2.9.0 self-validation: test-runner runs the substrate's own test suite and correctly reports 345/0/345.
+- **`state_admin template-sync` subcommand** (12 new tests). Automates the dual-track-workflow manifest's "files that must stay identical across all three repos" sync step. Two modes: `verify` (report drift only) and `sync` (copy source → targets then verify). Manifest configurable via `--manifest <path>` flag or `FNSR_TEMPLATE_SYNC_MANIFEST` env var; default is the substrate-shared file list (currently 92 files). Multiple targets supported via comma-separated `--targets`. Idempotent: second-run-on-clean-state exits 0. Replaces ad-hoc `cp -f` operator commands with a deterministic + verifiable workflow.
+- **`git-committer` system agent** ([.claude/agents/git-committer.md](.claude/agents/git-committer.md); 20 new tests). **First substrate agent with externally-visible side effects** — a commit lands in a repository that other systems (remotes, CI, collaborators) can see. Per Aaron's adjudication, safety-by-default with explicit-opt-in bypass:
+  - Default refuses dirty working tree (changes outside operator-specified `paths`)
+  - Default refuses commits to branches in `protected_branches` (default: main, master; configurable via `FNSR_PROTECTED_BRANCHES` env var)
+  - Default refuses bypass-hooks
+  - Each can be overridden via `allow_dirty`, `allow_protected_branch`, `allow_bypass_hooks` flags PAIRED with required `bypass_reason` recorded in audit chain. Every bypass becomes a citable audit event.
+  - Two-class failure discrimination (per Aaron's CP4 adjudication): `hook_failure` (pre-commit hook rejected; operator fixes code) vs `git_command_failure` (git itself rejected for non-hook reason; operator fixes substrate/environment). Both under `unresolved_predicate` miss class; `evidence.reason` discriminates downstream tooling filtering.
+  - Multi-line commit messages preserved via stdin (HEREDOC-safe; no shell escaping).
+  - Does NOT push. Push is a separate operator action; intentionally keeps the externally-visible cross-system step under explicit operator control.
+
+### Changed
+
+- CLAUDE.md §3 Agent Roster — `test-runner` and `git-committer` added.
+- CLAUDE.md §10 Key Files — `state_admin.py` row enumerates v2.9.0 `template-sync` subcommand.
+- PLAYBOOK.md §1 gains three new failure-mode entries (test-runner unresolvable command; git-committer refused_unsafe_commit; git-committer hook_failure vs git_command_failure discrimination).
+- PLAYBOOK.md gains §4.10 ("Operator-review-before-queuing for external-side-effect agents") — the pattern established by `git-committer` for the substrate's first externally-visible-side-effect agent; documents the discipline for future external-side-effect agents (git-pusher, email-sender, api-caller, webhook-emitter) and the FNSR-relevant precedent for normative apparatus that produces external effects.
+
+### Substrate primitive: external-side-effect agent pattern (FNSR-relevant)
+
+`git-committer` establishes the substrate's pattern for agents that act unrecoverably in the world:
+
+1. **Default refuse under judgment conditions.** Safety-critical defaults (`allow_dirty: false`, `allow_protected_branch: false`, `allow_bypass_hooks: false`) push toward conservative refusals.
+2. **Opt-in bypass requires explicit operator flag + bypass_reason.** Every bypass becomes a citable audit event recording operator intent at the moment of override.
+3. **No auto-chaining to further external operations.** `git-committer` does not push; future external-side-effect agents do not auto-chain to subsequent external steps. Each externally-visible step is its own dispatched agent under separate operator review.
+4. **Operator-review-before-queuing pattern documented in PLAYBOOK** as substrate discipline for this class of agent.
+
+The synthetic moral person project will eventually require normative apparatus that produces external effects (decisions communicated to stakeholders; commitments made; resources allocated). The pattern established here for `git-committer` is the substrate's precedent: external-side-effect agents are bounded by operator review, not just by substrate validation.
+
+### Why v2.9.0 as a distinct lead-in release
+
+The build order has v2.9.0 (test-runner + git-committer + template-sync) preceding v3.0 (MAREP integration + generalized synthesist + phase-exit retro). v2.9.0 is small enough to ship as a single checkpoint (~450 LOC + ~90 tests; came in at ~700 LOC + 51 tests). Shipping it distinctly clears subject-work tooling out of the way before v3.0's larger architectural moves, gives operators time to adopt the new tools (especially the `template-sync` and `git-committer` patterns) before v3.0's MAREP retros begin using them in operator chains.
+
+After v2.9.0 ships, v3.0-alpha.1 starts against the integrated MAREP scope per the v3.0 specs filed to FNSR archive (`ariadne/archive/specs/MAREP-v2.2/`).
+
 ## v2.8.0 — Verification-as-substrate: full verification ritual + Pass 2a/2b chain
 
 The substrate's biggest single-version delta in its history. v2.8.0 implements the verification-ritual surface per FNSR Protocol Spec 02, completes the Pass 2a / Pass 2b chain per Spec 03 with `commit-finalize` retiring the v2.7.0 operator-applier interim, ships the four-class miss taxonomy with operator-fix path discrimination, and adds the full forward-track operating surface (create / inherit / transition / list / aging) per Spec 07.
