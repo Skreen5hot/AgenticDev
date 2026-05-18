@@ -82,7 +82,7 @@ These phrases govern MY conversational behavior in this chat — they are NOT th
 
 **Validation.** Two tracks, by scope of change:
 
-- **Barcode orchestrator** (Python): `python -m unittest discover tests` from the project root. The suite covers routing, the output extractor, CPS (null + structured error + required-keys + multi-mode required-keys + ADR-citation registry + awaiting-decision shape + reconnaissance/architect ratification contracts), audit-trail hashing, upstream resolution, in-progress reconciliation + daemon lock, the applier system agent, the ADR-012 ghost fixture (FNSR Spec 06), and the state_admin operator CLI (reset / abandon / append / verify / status / resolve / bank / transition-banking / phase-boundary / forward-track create / forward-track inherit). Every daemon change MUST keep the suite green.
+- **Barcode orchestrator** (Python): `python -m unittest discover tests` from the project root. The suite covers routing, the output extractor, CPS (null + structured error + required-keys + multi-mode required-keys + `default_mode` mechanism + ADR-citation registry + awaiting-decision shape + reconnaissance/architect ratification contracts), audit-trail hashing, upstream resolution, in-progress reconciliation + daemon lock, the applier system agent, the ADR-012 ghost fixture (FNSR Spec 06), the verification-ritual machinery (category-spec loader; predicate resolver; subject-project hook loader; Cat 1–8 predicates + Cat 10 stub; orchestrator with four-class miss taxonomy and two-cadence dispatch), and the state_admin operator CLI (reset / abandon / append / verify / status / resolve / bank / transition-banking / phase-boundary / forward-track create / inherit / transition / list / aging). Every daemon change MUST keep the suite green.
 - **Subject project**: each project defines its own validation commands. Check `./project/CLAUDE.md`, `./project/SPEC.md`, or the project's README for the expected build/test invocations. Do not invent test commands — read them from the project's own contract.
 
 **Brevity.** Provide the "what" and the "how." Explain "why" only when asked.
@@ -279,6 +279,47 @@ The v2.6.0 `bank` command emitted `event=forward_track` with a banking-shaped pa
 | Banking (observation ABOUT the protocol) | `forward_track` (misnamed) | `banking` | Per Spec 05. Existing v2.6.0 events remain in the chain and are read as legacy bankings. |
 | Forward-track (commitment to FUTURE deliberation) | (did not exist) | `forward_track` | Per Spec 07. New in v2.7.0; payload has `forward_track_id` field which legacy banking events do not. |
 
+## 7.11 Verification Ritual Surface (FNSR Spec 02; v2.8.0)
+
+The verification ritual catches references that drift from canonical sources at machine speed. Per FNSR Protocol Spec 02 §"Core structure", each ritual category is one specification file under `surfaces/verification/categories/cat-NN-*.md`; the substrate loads them at dispatch time.
+
+### Two-agent split
+
+- **`verification-ritual`** system agent (deterministic Python) runs Cat 1–8 + Cat 10. Defers Cat 9 + Cat 8-semantic-equivalence cases to LLM via `overall_status: needs_llm_judgment`.
+- **`verification-ritual-llm`** worker agent (LLM) runs `cat-9-judge` and `cat-8-semantic-equivalence` modes when the deterministic step defers.
+- **`adversarial-critic`** worker agent in `cat-9-second-pass` mode confirms / disputes / extends Cat 9 LLM verdicts that veto. Fires on vetoes only.
+
+### Pass 2a / Pass 2b chain (v2.8.0 canonical)
+
+```
+reconnaissance               (read-only investigation)
+    ↓
+verification-ritual          (deterministic)
+    ↓ (if needs_llm_judgment)
+verification-ritual-llm      (LLM judge)
+    ↓ (if ≥1 Cat 9 veto)
+adversarial-critic           (cat-9-second-pass)
+    ↓
+ratification                 (architect Pass 2a; six-field ruling)
+    ↓
+commit-finalize              (Pass 2b; applier; verification-ritual gating
+                              via the architect's referenced_evidence)
+```
+
+`commit-finalize` is a documented task type in v2.8.0; the substrate's `depends_on` graph carries the wiring. The architect's ratification ruling references the verification-ritual task @id in its `referenced_evidence` field. Operator queues the chain; substrate enforces dispatch ordering.
+
+### Four miss classes
+
+`per_category_result` miss entries carry `evidence.miss_class`: `malformed_spec` (operator fixes spec) | `unresolved_predicate` (operator fixes code) | `missing_canonical_source` (operator provides source) | `categorical_coverage_miss` (phase-exit-retro deliberable).
+
+### Surface-registry primitive (Spec 01)
+
+`surfaces/verification/` is the first explicit use of the surface-registry primitive. Future surfaces follow `surfaces/<surface>/<bucket-or-category>/` layout. Adding a new ratified category = drop a new file + (for deterministic) implement the named Python predicate, or (for LLM) declare the dispatcher agent + mode in frontmatter.
+
+### Read-compat for v2.7.0 chains
+
+The audit chain's append-only invariant means v2.7.0 operator-applier chains remain valid in v2.8.0 state files. New chains use the v2.8.0 commit-finalize shape; old chains continue to verify under `state_admin.py verify`.
+
 ## 8. The Kickoff Ritual
 
 A fresh instance of the template ships with `state.jsonld` pre-loaded with the standard **kickoff ritual** — a 12-task chain that turns a SPEC into a reviewed, revised, and detail-planned project roadmap. This is what runs when the operator clones the template, drops a SPEC.md into `./project/`, and runs the daemon.
@@ -361,7 +402,7 @@ Subject-specific layer boundaries, validation commands, language conventions, an
 | File | Purpose |
 |---|---|
 | [fnsr_daemon.py](fnsr_daemon.py) | The orchestrator — single-file Python stdlib. |
-| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation. v2.6.0 subcommands: `reset`, `abandon`, `append-tasks`, `verify`, `status`, `resolve`, `bank`. v2.7.0 subcommands: `transition-banking` (Spec 05 state transitions), `phase-boundary` (operator-emitted phase boundary), `forward-track create` and `forward-track inherit` (Spec 07 forward-track surface). `status` surfaces `awaiting_operator_decision` tasks at the top. v2.7.0's `bank` accepts `--category` (Spec 05) and `--state`; v2.6.0's `--candidate-class` flag remains accepted. Run `python state_admin.py --help`. |
+| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation. v2.6.0 subcommands: `reset`, `abandon`, `append-tasks`, `verify`, `status`, `resolve`, `bank`. v2.7.0 subcommands: `transition-banking`, `phase-boundary`, `forward-track create` / `inherit`. v2.8.0 forward-track subcommands: `transition` (A→B→C with `--resolution-path`), `list` (filters by sub_surface/state/phase), `aging` (flags forward-tracks inherited through ≥ threshold phases without resolution; emits `forward_track_aging_warning` audit events; threshold via `--threshold` or `FNSR_FORWARD_TRACK_AGING_THRESHOLD_PHASES` env var). Run `python state_admin.py --help`. |
 | [state.jsonld](state.jsonld) | JSON-LD work queue with hash-chained audit trail. Ships with the kickoff ritual pre-loaded. |
 | `state.jsonld.lock` | OS-level lock for state I/O (auto-created, gitignored). |
 | `fnsr.pid` | OS-level daemon-instance lock (auto-created, gitignored). |

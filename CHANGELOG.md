@@ -4,6 +4,91 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v2.8.0 — Verification-as-substrate: full verification ritual + Pass 2a/2b chain
+
+The substrate's biggest single-version delta in its history. v2.8.0 implements the verification-ritual surface per FNSR Protocol Spec 02, completes the Pass 2a / Pass 2b chain per Spec 03 with `commit-finalize` retiring the v2.7.0 operator-applier interim, ships the four-class miss taxonomy with operator-fix path discrimination, and adds the full forward-track operating surface (create / inherit / transition / list / aging) per Spec 07.
+
+Shipped in four checkpoints (v2.8.0-alpha.1 through v2.8.0-alpha.3, finalized in this release). Each checkpoint preserved the green-suite invariant; gaps surfaced at each checkpoint were adjudicated and folded into the next before building on the foundation.
+
+### What v2.8.0 means for the substrate
+
+After v2.6.0 (substrate move: verbal discipline → audit events), v2.7.0 (discipline-pass move: reconnaissance + ratification chain), and now v2.8.0, the substrate is no longer a thin coordinator with discipline added on top. It's a substrate that operates **protocol depth at machine speed across the full Pass 2a/Pass 2b chain**, with deterministic-where-possible / LLM-where-necessary / adversarial-critic-where-LLM-judgment-changes-state, audit-chain-for-all-of-it.
+
+This is the FNSR-relevant milestone. The synthetic moral person project requires substrates that operate normative depth at machine speed without losing audit-trail honesty. v2.8.0 demonstrates that's achievable in the verification surface; the architecture generalizes to other normative surfaces v2.9.0+ will introduce.
+
+### Added — verification ritual (Cat 1–10)
+- **`surfaces/verification/` directory layout** (Spec 01 surface-registry primitive). `surface-spec.md` + `categories/cat-NN-*.md` per ratified category. Future surfaces follow `surfaces/<surface>/<bucket-or-category>/` pattern.
+- **Cat 1–7 deterministic predicates** (CP1). Structural lookups against frozen contracts: spec section existence, ADR cross-reference, Q-ruling cross-reference, reason-code frozen enum, FOL/OWL @type discriminator, manifest mirror consistency, cross-phase + cross-amendment cross-reference.
+- **Cat 8 hybrid two-cadence** (CP2). Pre-routing structural (IRI/CURIE existence) + activation-time strict-equality with `needs_llm_judgment` deferral when artifact carries `semantic_equivalence_acceptable: {reason, scope}` structured flag.
+- **Cat 9 LLM candidacy** (CP3). Cited-content consistency judging via `verification-ritual-llm` worker agent's `cat-9-judge` mode. Category-agnostic prompt: receives `citation_reference` + `citing_framing` + `canonical_content`; verdicts `consistent | inconsistent`. ADR-012 ghost (FNSR Spec 06) AND Q-4-Step5-A spec §3.4.1 case as parallel examples in the prompt — Cat 9 covers any STRUCTURAL-only lower category's semantic gap.
+- **Cat 10 candidacy** (CP2). Subject-project-hook framework. Substrate ships `.md` spec + `.py` stub returning `not_implemented_for_this_subject_project`. Subject projects with type-field-structure discipline overlay the stub with a real parser (TypeScript interfaces, Rust traits, OWL constraints, etc.).
+- **`verification-ritual` system agent** (CP1). Loads category specs at dispatch; runs deterministic categories; defers LLM categories via `overall_status: needs_llm_judgment`. Required outputs: `per_category_result`, `overall_status`, `new_candidacies`, `summary`.
+- **`verification-ritual-llm` worker agent** (CP3). Second instance of the **read-only-by-contract agent pattern** (after `reconnaissance` v2.7.0). Two modes: `cat-9-judge` + `cat-8-semantic-equivalence`. Multi-mode `required_outputs`. Tools: Read/Grep/Glob.
+- **`adversarial-critic` cat-9-second-pass mode** (CP3). Third instance of the read-only-by-contract pattern. Fires on Cat 9 **vetoes only** (verdicts that change downstream state); Cat 9 passes don't need second-pass. Verdict shape: `confirm_veto | dispute_veto | extend_veto`. Multi-mode `required_outputs` with `default_mode: review-second-pass` for back-compat with v2.5.0+ dispatches.
+
+### Added — substrate primitives
+- **`PredicateMetadata` dataclass** (CP2; Gap H). Typed substrate-supplied context (`self_path`, `task_id`, `cycle_id`, `phase_context`, `cadence`) threaded to every category predicate. Cat 7's `self_path` migrated out of canonical_sources namespace abuse into metadata.
+- **Subject-project hook loader** (CP2; Gap F). Sibling `cat-NN-*.py` files alongside specs are auto-imported into per-surface sandbox namespace at `subject.<surface>.<module-name>`. Defensive: ImportError surfaces as `unresolved_predicate` miss with `details.import_error`. `_resolve_predicate` supports three qualified-name shapes.
+- **`default_mode` frontmatter mechanism** (CP3). Multi-mode agents declare a default mode; daemon uses it when `task.inputs.mode` is absent. Preserves back-compat for single→multi-mode agent migrations.
+- **`FNSR_SURFACES_DIR` env var** (CP1; default `./surfaces`). Operator can override surfaces directory location.
+- **`FNSR_FORWARD_TRACK_AGING_THRESHOLD_PHASES` env var** (CP4; default 3). Tunable per subject-project phase cadence.
+
+### Added — four-class miss taxonomy (v2.8.0-alpha.2 + alpha.3)
+
+`per_category_result` miss entries carry `evidence.miss_class` discriminating four operator-fix paths:
+
+| Miss class | Operator fix path |
+|---|---|
+| `malformed_spec` | edit / repair the cat-NN-*.md spec file |
+| `unresolved_predicate` | fix the predicate code |
+| `missing_canonical_source` | provide the canonical source(s) — `details.missing_canonical_source_keys` lists them |
+| `categorical_coverage_miss` | phase-exit-retro deliberable territory (Cat 9 / Cat 10 candidacy surfacing class) |
+
+Each class is independently filterable; downstream tooling selects the operator action type cleanly.
+
+### Added — forward-track operating surface (CP4)
+- **`state_admin forward-track transition`** — lifecycle A→B→C per Spec 07. State C requires `--resolution-path` (one of `ratified-into-spec`, `merged-into-roadmap-release`, `withdrawn`). Emits `forward_track_state_transition` audit event.
+- **`state_admin forward-track list`** — query by `--sub-surface`, `--state`, `--phase` filters.
+- **`state_admin forward-track aging`** — flag forward-tracks inherited through ≥ threshold phases without resolution. Aging warnings are themselves `forward_track_aging_warning` audit events (per Aaron's CP4 observation: warnings are audit-chain entries, not just CLI output; future operators can review aging history at phase boundaries).
+- **`state_admin forward-track create --surfacing-task-id`** (CP3 refinement). Records the originating task — preserves audit-trail evidence for phase-exit-retro deliberation without manual chain-walking.
+
+### Added — Pass 2a/2b chain canonical (CP4)
+- **`commit-finalize` task type documented** as canonical Pass 2b consumer per FNSR Spec 03 + Aaron's Gap C adjudication. The substrate's `depends_on` graph carries the wiring; CPS enforces dispatch ordering. The architect's ratification ruling references the verification-ritual task @id in its `referenced_evidence` field.
+- **Read-compat with v2.7.0 operator-applier chains preserved**. The audit chain's append-only invariant means v2.7.0 entries remain valid in v2.8.0 state files; new chains use the v2.8.0 shape; old chains continue to verify under `state_admin.py verify`.
+
+### Changed
+- CLAUDE.md gains §7.11 (Verification Ritual Surface). §3 Agent Roster lists `verification-ritual`, `verification-ritual-llm`; `adversarial-critic` row documents two-mode contract. §5 Validation and §10 Key Files updated.
+- PLAYBOOK.md gains §4.9 (Verification ritual operator patterns), §4.7/4.8 (Pass 2a sequencing + phase-boundary workflows from v2.7.0). Four-miss-class operator-fix table documented; v2.7.0/v2.8.0 audit-chain-shape read-compat called out.
+- Orchestrator's category-loop ordering: `missing_canonical_source` check moved BEFORE the LLM-deferral check. Cat 9 only defers when canonical sources are present; otherwise it misses with the appropriate class. Substrate principle going forward: an LLM category should defer only when it has the inputs to make a judgment.
+
+### Tests
+**90 new unit tests added across v2.8.0 (was 156 at v2.6.0; now 294)**:
+- CP1: 48 (Cat 1–7 predicates + verification-ritual orchestration)
+- CP2: 24 (Cat 8 + Cat 10 framework + miss taxonomy + subject hooks + PredicateMetadata)
+- CP3: 15 (Cat 9 spec + verification-ritual-llm contract + adversarial-critic cat-9-second-pass + 4th miss class + --surfacing-task-id)
+- CP4: 16 (forward-track transition + list + aging + env var + chain integrity)
+
+Every daemon change kept the suite green at the per-checkpoint level. The v2.8.0 final suite is the union of all four checkpoint test sets.
+
+### Gap surfacing cadence — pattern stable across four checkpoints
+Each checkpoint surfaced gaps that the next checkpoint folded in:
+- CP1 → Gap F (per-category .py hook loader), Gap G (three-class miss taxonomy), Gap H (PredicateMetadata)
+- CP2 → Gap I (4th miss class: missing_canonical_source)
+- CP3 → orchestrator-ordering catch (LLM categories shouldn't defer without inputs)
+- CP4 → ready to ship
+
+The build-incrementally pattern — surface gaps as substrate observations; triage blocking vs clarifying vs mechanical; fold adjudicated refinements additively — is now stable substrate process, not just per-release procedure.
+
+### FNSR milestone — verification-as-substrate
+
+v2.8.0 is the verification-as-substrate move. The substrate now operates the full Pass 2a/Pass 2b discipline at machine speed with auditable LLM-judgment fallback. The `adversarial-critic` cat-9-second-pass pattern is the architecture's precedent for non-deterministic-but-auditable normative judgment — the same shape that the synthetic moral person project's reasoning apparatus will need at every level where moral judgments fall outside rule-checking territory.
+
+The build-order from v2.9.0+ extends the substrate (test-runner + git-committer + template-sync, then generalized synthesist + phase-exit-retro + phase-complete-declaration, then surface_audience) but doesn't change its fundamental nature. v2.8.0 is the change.
+
+### Provenance
+- FNSR Protocol Specifications v1.1 bundle (`project/Routing/00-README.md` and `01–07-*.md`); Logic-Team-reviewed.
+- Aaron's CP1/CP2/CP3/CP4 adjudications (Gaps A–I); the gap-surfacing cadence is itself substrate process.
+
 ## v2.8.0-alpha.3 — Verification ritual Checkpoint 3: Cat 9 LLM judge + adversarial-critic second-pass + 4th miss class
 
 Third checkpoint of v2.8.0. Adds the LLM side of the verification ritual per FNSR Spec 02 + Aaron's CP1 architectural call (two-agent split). Cat 9 (cited-content consistency) is the substrate's first non-deterministic verification category; the paired-verdict adversarial-critic second-pass mitigation makes its LLM judgment auditable rather than oracular. Plus Gap I — the fourth miss class — confirmed and split.
