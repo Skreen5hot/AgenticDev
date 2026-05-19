@@ -4,6 +4,99 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.0-alpha.2 — MAREP substrate primitives + Episodic→Semantic promotion + anti-pattern enforcement framework
+
+Second checkpoint of v3.0. Six deliverables per the MAREP-on-Barcode integration spec §17, with four implementation-pattern observations from Aaron folded in. **42 new tests; full suite 411 (was 369 at v3.0-alpha.1).**
+
+### Added — substrate primitives (second instance of pattern-conformance discipline)
+
+- **Episodic→Semantic Promotion** substrate-primitive doc at [surfaces/_primitives/episodic-to-semantic-promotion.md](surfaces/_primitives/episodic-to-semantic-promotion.md). The second substrate-primitive document (after BAO in v3.0-alpha.1). Per Aaron's CP2 observation #3: framed as **substrate-wide promotion pattern** that MAREP-retro is one instance of, NOT as MAREP-specific operator workflow. Documents the three memory layers (working / episodic / semantic), the two promotion boundaries, why deliberate-never-automatic, and the five surfaces where the pattern instantiates (retro, verification, banking lifecycle, forward-track, substrate primitives themselves).
+
+- **Anti-pattern enforcement framework** in `fnsr_daemon.py` (CP3 substrate-primitive doc will anchor on this section per Aaron's CP2 observation #2). Four generalizable patterns implemented:
+  - `_check_no_persona_theater` — rejects `@<agent>` patterns outside designated reference fields (`confirmed_by`, `contested_by`, `owner`, `supporting_sources`, `dissenting_sources`)
+  - `_check_no_redundant_affirmation` — Levenshtein-similarity-based rejection of substantive overlap with prior turn outputs (threshold configurable; default 0.85)
+  - `_check_no_freeform_brainstorm` — length-budget enforcement + forbidden-conversational-connectives scan
+  - `_section_pattern_matches` — JSONPath-subset matcher (formal subset per MAREP_INTEGRATION_SPEC §5.2; deterministic; substrate-vs-procedure pattern applied to scope authorization)
+  - Plus retro-surface scoping via `_is_retro_surface_task` (explicit `inputs.surface: retro` attribution; the anti-pattern checks fire only on retro-surface tasks per MAREP_INTEGRATION_SPEC §7.5)
+  - Plus length-budget frontmatter syntax: agents declare `length_budgets: {path: max_chars}` and `conversational_connectives_forbidden: [...]` in frontmatter; substrate parses via `_agent_anti_pattern_config`
+
+### Added — three analytical agents (read-only-by-contract pattern instances)
+
+- **`@QA`** ([.claude/agents/qa.md](.claude/agents/qa.md)) — Quality/verification perspective. Test coverage gaps, regression patterns, defect distribution, verification-scope drift, test-infrastructure friction.
+- **`@DeliveryManager`** ([.claude/agents/delivery-manager.md](.claude/agents/delivery-manager.md)) — Sprint cadence and coordination. Predictability, throughput, blockers, coordination overhead, dependency thrash.
+- **`@RiskAnalyst`** ([.claude/agents/risk-analyst.md](.claude/agents/risk-analyst.md)) — Latent risk surfacing. Hidden failure modes, systemic fragility, operational exposure, coupling brittleness, single-point-of-failure observations. Distinct from `@Skeptic` (which challenges existing findings); `@RiskAnalyst` surfaces risks that didn't fire this sprint but will under named trigger conditions.
+
+All three follow the read-only-by-contract pattern (third / fourth / fifth substrate instances after reconnaissance, verification-ritual-llm, adversarial-critic, synthesist). Each declares `length_budgets` + frontmatter consistent with the anti-pattern enforcement framework. Plus retro-surface role binding stubs under `surfaces/retro/agents/`.
+
+### Added — `retro-applier` system agent
+
+[.claude/agents/retro-applier.md](.claude/agents/retro-applier.md) + `_retro_apply` in fnsr_daemon.py. Deterministic merger of analytical-agent proposals into RETRO_STATE.jsonld. Per MAREP_INTEGRATION_SPEC §8:
+
+- Inputs: `retro_state_path`, `proposals` dict keyed by source-task @id, `version_read` (CAS check), `surface: retro`
+- Outputs: `applied`, `failed`, `retro_state_version`, `summary`
+- CAS semantics per MAREP v2.2 §9: rejects on version_mismatch
+- Idempotent via @id key: re-applying a proposal with an existing @id is a no-op
+- Single audit-chain entry per dispatch (atomic mutation across all proposals)
+- Reuses substrate v2.8.0 hash-chain via `hiri_sign`
+
+Analog to v2.6.0 `applier` for code changes; scoped to retro state instead of filesystem.
+
+### Added — `state_admin phase-complete-declaration` operator surface
+
+Per Aaron's CP2 observation #4: **operator-authoritative**, NOT predicate-derived. The future automation hook (AC-pass rollup via test-runner or similar) remains future work. CP2 ships only the operator-declared event mechanism. Audit entries carry `declaration_kind: operator_authoritative` so future operators (and the eventual automation hook) can distinguish operator-declared from predicate-derived events.
+
+CLI shape: `state_admin phase-complete-declaration <phase> --anchor-task <id> --rationale "<...>" [--acceptance-criteria-met ...] [--acceptance-criteria-pending ...]`. Rationale is required (recorded in audit chain); empty/whitespace rationale refused.
+
+The three phase-related commands (phase-complete-declaration, phase-boundary, forward-track inherit) are deliberately separate — the operator may declare phase-complete without immediately transitioning the boundary (e.g., to allow phase-exit retro deliberation first per the E→S promotion discipline).
+
+### Added — MAREP-Orchestrator BAO agent contract
+
+[.claude/agents/marep-orchestrator.md](.claude/agents/marep-orchestrator.md) — first retro-surface BAO instance per MAREP v2.2 §4.1. Four-mode multi-mode contract:
+
+- `phase-transition` — proposes advancing the retro to the next phase
+- `conflict-detection` — surfaces unresolved disagreements with structured positions
+- `consensus-summary` — synthesizes confirmed/rejected/contested outcomes
+- `final-compression` — generates Phase 6 deliverables + Episodic→Semantic promotion candidates
+
+Each mode declares its `required_outputs` + `length_budgets` per the anti-pattern enforcement framework. Honors all four BAO bounds. End-to-end LLM dispatch testing lands at v3.0 final; CP2 ships the contract surface (validated by `TestBaoBoundsValidation` from v3.0-alpha.1).
+
+### Added — `TestReadOnlyContractValidation` (corpus-wide pattern conformance)
+
+Per Aaron's CP2 observation #1: the substrate's pattern-conformance discipline extended to the read-only-by-contract pattern. `TestReadOnlyContractValidation` walks all agents declaring `contract_class: read-only` and validates:
+
+- No `Edit` / `Write` / `Bash` tools (read-only invariant)
+- `required_outputs` declared (CPS-enforceable contract surface)
+- Refusal contract documented in prompt (operator-discoverable error envelope)
+
+This is the second cross-instance pattern-conformance test (after CP1's `TestBaoBoundsValidation`). The substrate now mechanically validates conformance to **two** architectural patterns across the agent corpus.
+
+**The test caught a real gap during CP2 development:** verification-ritual-llm (shipped in v2.8.0-alpha.3) lacked a documented refusal contract. The test surfaced it; CP2 added the missing section. This is the pattern-conformance discipline working as designed — substrate self-validates during development, not just at release time.
+
+### Changed
+
+- CLAUDE.md §3 Agent Roster: marep-orchestrator + qa + delivery-manager + risk-analyst + retro-applier added.
+- CLAUDE.md §10 Key Files: state_admin.py row enumerates v3.0-alpha.2 phase-complete-declaration subcommand.
+- surfaces/retro/agents/ gains 3 new role binding stubs (qa, delivery-manager, risk-analyst); orchestrator stub upgraded to point at the v3.0-alpha.2 agent contract.
+- v3.0-alpha.1 `TestRetroSurfaceFoundation.test_role_bindings_load` updated for the new role count (8 total, up from 5).
+- Template-sync default manifest extended with 18 new v3.0-alpha.2 files. **Third ouroboros instance**: v3.0-alpha.2 shipped using v2.9.0's `template-sync` command + v2.9.0's `test-runner` validation of the substrate's own test suite.
+
+### Substrate self-documentation continues to scale
+
+v3.0-alpha.1 introduced `surfaces/_primitives/` directory convention + `TestBaoBoundsValidation` cross-instance validation. v3.0-alpha.2 extends both:
+
+- `surfaces/_primitives/` gains its second primitive doc (Episodic→Semantic)
+- Pattern-conformance validation extends to a second pattern (read-only-by-contract)
+
+Two patterns documented as substrate primitives + two cross-instance validation tests means the substrate now tracks four invariants mechanically: BAO surface scope, BAO substrate enforcement, BAO audit visibility, BAO no-privilege; plus read-only tools, required_outputs, refusal-contract docs. Future patterns inherit the same discipline.
+
+### What's still pending for v3.0 final
+
+- Phase-exit retro end-to-end (operator chain: gathering → merge → analysis → consensus → actions → compression, dispatching marep-orchestrator at each transition)
+- `state_admin retro` subcommand family (init / phase-transition / vote / archive / verify / list)
+- Episodic→Semantic promotion path operationalized end-to-end
+- Substrate-mechanical anti-pattern enforcement framework formalized as the third substrate-primitive doc (anchoring on the fnsr_daemon.py section established in CP2)
+- Final docs sweep + v3.0 tag + alpha series retires
+
 ## v3.0-alpha.1 — First checkpoint of v3.0: BAO pattern formalization + generalized synthesist + retro surface foundation
 
 First checkpoint of v3.0 per the MAREP-on-Barcode integration spec (`ariadne/archive/specs/MAREP-v2.2/MAREP_INTEGRATION_SPEC.md` §17). Establishes the foundation for v3.0's two architectural moves: deliberative reflection (MAREP retros) operating alongside evidence-gated change (v2.8.0's Pass 2a/2b chain), and the **Bounded-Authority Orchestrator (BAO) substrate primitive** as a reusable pattern for elevated-authority LLM agents.
