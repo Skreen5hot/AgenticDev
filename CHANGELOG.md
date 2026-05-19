@@ -4,6 +4,92 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.0 — MAREP-on-Barcode integration complete: retro surface operationalized + Episodic→Semantic promotion path + anti-pattern enforcement primitive
+
+Final checkpoint of the v3.0 series. Operationalizes the retro surface end-to-end, makes Episodic→Semantic promotion citable in the audit chain, and formalizes the anti-pattern enforcement framework as the third substrate primitive doc per Aaron's CP3 greenlight observations. **33 new tests; full suite 444 (was 411 at v3.0-alpha.2).**
+
+The alpha series retires. v3.0 is the v3.0.
+
+### Added — third substrate primitive doc
+
+- **Anti-Pattern Enforcement** substrate-primitive doc at [surfaces/_primitives/anti-pattern-enforcement.md](surfaces/_primitives/anti-pattern-enforcement.md). The third substrate-primitive document (after BAO in v3.0-alpha.1 and Episodic→Semantic in v3.0-alpha.2). Per Aaron's CP3 observation #1: framed as **substrate-wide enforcement discipline** that MAREP-retro is one explicit instance of, NOT as retro-particular. Documents the three structural properties (forbidden-at-output-level + deterministic-detector + structured-error-veto), the relationship to the older CPS infrastructure (retroactively recognized as anti-pattern enforcement instances), and the five surfaces where the pattern instantiates.
+
+### Added — Semantic-memory immutability check (second substrate-wide anti-pattern instance)
+
+- **`_check_no_semantic_memory_mutation`** in `fnsr_daemon.py`. Inspects `changes[*]` for paths targeting canonical semantic memory (`CLAUDE.md`, `PLAYBOOK.md`, `project/DECISIONS.md`, `project/SPEC.md`, `project/ROADMAP.md`, `project/IMPLEMENTATION_PLAN.md`, `surfaces/`, `.claude/agents/`, `project/Routing/`, `arc/`). Raises `ContainmentVeto` with error `semantic_memory_immutable_from_retro` when a retro-surface task (`inputs.surface == "retro"`) attempts direct mutation.
+
+  Wired into `cps_check` alongside the v3.0-alpha.2 anti-pattern checks. Helper has defense-in-depth retro-scoping (early-returns on non-retro tasks even if called directly). Non-retro tasks pass through to the standard ratification chain unchanged.
+
+  Per the Episodic→Semantic discipline: the only path to mutate semantic memory is through `state_admin promote-candidate` followed by the standard ratification chain. The substrate refuses every other path.
+
+### Added — `state_admin retro` operator command family
+
+Six subcommands for the retro-surface operator workflow:
+
+- `retro init <retro-id> --anchor-task <id> --phase-origin <phase>` — creates `retros/<retro-id>/RETRO_STATE.jsonld` with chain-hashed `audit[]` array; emits the genesis `retro_initialized` event chained from zero-hash. Refuses duplicate retro-ids.
+- `retro phase-transition <retro-id> --to-phase <phase> --rationale "..."` — commits operator-mediated phase advancement. The MAREP-Orchestrator BAO PROPOSES transitions via its `phase-transition` mode; the operator REVIEWS and COMMITS via this command (per BAO bound #4, no substrate-level privilege). Requires non-whitespace rationale; refuses no-op advance.
+- `retro vote <retro-id> --issue-id <id> --voter <role> --vote {confirm|reject|contest}` — records operator-mediated vote on a retro issue per MAREP §15. Vote lands in `votes[]` + audit event. `--vote=contest` requires `--rationale`.
+- `retro archive <retro-id> [--archive-path <path>]` — promotes the retro state to episodic memory at `archive/retrospectives/<retro-id>.jsonld` (default); marks active state `status=archived`; surfaces `promotion_candidates[]` for operator E→S deliberation. The active state file is preserved (not deleted) for audit continuity. Refuses already-archived retros.
+- `retro verify <retro-id>` — verifies retro audit chain integrity via the same `hiri_sign` mechanism used for state.jsonld; detects tampering.
+- `retro list [--include-archived] [--status active|archived]` — walks active + (optionally) archived retros; reports phase / version / status / location.
+
+Configurable via `FNSR_RETRO_DIR` (default `./retros`) and `FNSR_RETRO_ARCHIVE_DIR` (default `./archive/retrospectives`) env vars.
+
+### Added — `state_admin promote-candidate` (deliberate Episodic→Semantic promotion event)
+
+Per Aaron's CP3 observation #3: the audit-citable moment of deliberate promotion. This command does NOT mutate semantic memory; it emits a `forward_track` event with:
+
+- `subject.type: candidacy`
+- `declaration_kind: operator_deliberate_promotion` (distinct from any prior forward-track declaration_kind)
+- `to_semantic: <destination path>`
+- `from_episodic: <retro-id>` (provenance back to originating retro)
+- `surfacing_task_id: <task-id>` (per CP3 Spec 07 §"audit-trail honesty")
+- `promotion_rationale: <operator's stated rationale>`
+- Standard Spec 07 forward-track fields (`forward_track_id`, `state: A`, `sub_surface: internal-methodology-refinement`, `transition_history`, etc.) — so the v2.8.0 `forward-track transition/list/aging` commands operate it without modification.
+
+Anchor resolution: `--anchor-task` explicit, OR `--from-retro <retro-id>` auto-resolves to the retro's recorded `anchor_task`. The actual semantic-memory mutation then goes through the standard ratification chain (reconnaissance → ratification → commit-finalize), which the operator queues separately. The substrate's `_check_no_semantic_memory_mutation` refuses every other path — the promotion path is the only path.
+
+Per FNSR moral-person relevance: the audit-event shape matters beyond MAREP. The synthetic moral person project will cite this pattern as canonical for tacit-to-formal transitions.
+
+### Added — Retro phase specs at v3.0 final (no longer stubs)
+
+All six retro phase specs under `surfaces/retro/phases/` now declare `status: v3.0 final` and enumerate per-role permitted_sections tables. Each phase spec documents:
+
+- Entry / exit criteria
+- Operating contract (which role dispatches; how the orchestrator coordinates)
+- Per-role permitted_sections table (what may be proposed; what must not be touched)
+- Exit gate (which `state_admin retro phase-transition` invocation commits exit)
+
+Phase 5 (Action Assignment) introduces the `promotion_candidates[]` section schema — agents propose E→S candidacies here; the operator deliberates each at archive time. Phase 6 (Final Compression) documents the deliberate-not-automatic E→S boundary and the operator-review path.
+
+### Changed
+
+- CLAUDE.md gains §7.12 "Retro Surface and the Episodic→Semantic Promotion Path (v3.0 final)" documenting the operator command family + promotion path + anti-pattern enforcement on retro surface + substrate primitives used.
+- CLAUDE.md §3 Agent Roster: `marep-orchestrator` row updated to reflect operationalized status.
+- CLAUDE.md §10 Key Files: `state_admin.py` row enumerates v3.0 retro family + promote-candidate; new rows for `retros/`, `archive/retrospectives/`, `surfaces/_primitives/`, `surfaces/retro/`.
+- PLAYBOOK.md gains §4.11 "Operating a phase-exit retro end-to-end (v3.0 final)" — complete operator chain from phase-complete-declaration through promote-candidate, plus stall-recovery matrix.
+- Template-sync default manifest extended with: `surfaces/_primitives/anti-pattern-enforcement.md`, `tests/test_v3_final_substrate.py`.
+
+### Substrate self-documentation reaches three primitive docs + two corpus-wide tests
+
+v3.0 closes the substrate self-documentation initiative that v3.0-alpha.1 began:
+
+- `surfaces/_primitives/` contains three primitive docs: BAO (alpha.1), Episodic→Semantic Promotion (alpha.2), Anti-Pattern Enforcement (final).
+- `TestBaoBoundsValidation` (alpha.1) + `TestReadOnlyContractValidation` (alpha.2) mechanically validate two architectural patterns across the agent corpus.
+- The substrate now mechanically enforces seven invariants: BAO's four bounds (surface scope, substrate enforcement, audit visibility, no-privilege), read-only contract's three properties (read-only tools, required_outputs, refusal-contract docs).
+
+Future patterns inherit the same discipline: primitive doc at `surfaces/_primitives/<pattern>.md` + corpus-wide validation test if applicable. The ouroboros pattern (substrate ships substrate-improvements via substrate-shipped tooling) holds at v3.0 — this release shipped via v2.9.0's `template-sync` and the v2.9.0 `test-runner`.
+
+### Closing the v3.0 build
+
+The v3.0 series scope: integrate MAREP v2.2 into the Barcode substrate end-to-end, with the substrate's existing audit-chain + CPS + permitted_sections + ratification machinery as the spine. Three checkpoints landed cleanly:
+
+- **v3.0-alpha.1**: BAO pattern formalization + generalized synthesist + retro surface foundation (+ `surfaces/_primitives/` directory convention + `TestBaoBoundsValidation`)
+- **v3.0-alpha.2**: MAREP substrate primitives + Episodic→Semantic primitive doc + anti-pattern framework + three analytical agents + retro-applier + phase-complete-declaration + MAREP-Orchestrator contract (+ `TestReadOnlyContractValidation`)
+- **v3.0 (THIS RELEASE)**: retro operationalized end-to-end + Episodic→Semantic promotion path + anti-pattern enforcement primitive doc + semantic-memory immutability check
+
+Pending for v3.1.0: the `surface_audience` primitive (originally-scoped v3.1 work per Aaron's CP3 closeout). After v3.1, the substrate's originally-scoped trajectory closes.
+
 ## v3.0-alpha.2 — MAREP substrate primitives + Episodic→Semantic promotion + anti-pattern enforcement framework
 
 Second checkpoint of v3.0. Six deliverables per the MAREP-on-Barcode integration spec §17, with four implementation-pattern observations from Aaron folded in. **42 new tests; full suite 411 (was 369 at v3.0-alpha.1).**

@@ -409,11 +409,15 @@ Subject-specific layer boundaries, validation commands, language conventions, an
 | File | Purpose |
 |---|---|
 | [fnsr_daemon.py](fnsr_daemon.py) | The orchestrator — single-file Python stdlib. |
-| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation. v2.6.0 subcommands: `reset`, `abandon`, `append-tasks`, `verify`, `status`, `resolve`, `bank`. v2.7.0 subcommands: `transition-banking`, `phase-boundary`, `forward-track create` / `inherit`. v2.8.0 forward-track subcommands: `transition` (A→B→C with `--resolution-path`), `list` (filters by sub_surface/state/phase), `aging` (flags forward-tracks inherited through ≥ threshold phases without resolution; emits `forward_track_aging_warning` audit events; threshold via `--threshold` or `FNSR_FORWARD_TRACK_AGING_THRESHOLD_PHASES` env var). Run `python state_admin.py --help`. |
+| [state_admin.py](state_admin.py) | Operator CLI for state.jsonld manipulation. v2.6.0 subcommands: `reset`, `abandon`, `append-tasks`, `verify`, `status`, `resolve`, `bank`. v2.7.0 subcommands: `transition-banking`, `phase-boundary`, `forward-track create` / `inherit`. v2.8.0 forward-track subcommands: `transition` (A→B→C with `--resolution-path`), `list` (filters by sub_surface/state/phase), `aging` (flags forward-tracks inherited through ≥ threshold phases without resolution). v2.9.0 subcommand: `template-sync`. v3.0-alpha.2 subcommand: `phase-complete-declaration`. v3.0 final subcommand groups: `retro init` / `phase-transition` / `vote` / `archive` / `verify` / `list` (retro-surface operations per MAREP v2.2) + `promote-candidate` (deliberate Episodic→Semantic promotion audit event). Run `python state_admin.py --help`. |
 | [state.jsonld](state.jsonld) | JSON-LD work queue with hash-chained audit trail. Ships with the kickoff ritual pre-loaded. |
 | `state.jsonld.lock` | OS-level lock for state I/O (auto-created, gitignored). |
 | `fnsr.pid` | OS-level daemon-instance lock (auto-created, gitignored). |
+| `retros/<retro-id>/RETRO_STATE.jsonld` | Per-retro state with chain-hashed `audit[]`. v3.0 final. Override directory via `FNSR_RETRO_DIR` env var. |
+| `archive/retrospectives/<retro-id>.jsonld` | Archived retros (episodic memory per Spec 01 + MAREP §16). v3.0 final. Override via `FNSR_RETRO_ARCHIVE_DIR` env var. |
 | [.claude/agents/](.claude/agents/) | Agent contracts (worker + system) with frontmatter + body. |
+| [surfaces/_primitives/](surfaces/_primitives/) | Substrate primitive docs: BAO (v3.0-alpha.1), Episodic→Semantic Promotion (v3.0-alpha.2), Anti-Pattern Enforcement (v3.0 final). |
+| [surfaces/retro/](surfaces/retro/) | Retro surface: spec, per-phase specs, per-role bindings. |
 | [tests/](tests/) | Python `unittest` suite. Run `python -m unittest discover tests`. |
 | [PLAYBOOK.md](PLAYBOOK.md) | Operator playbook: failure-mode recognition + recovery patterns from real-world runs. Read this when a chain stalls. |
 | `./project/` | Subject project root (operator-populated). |
