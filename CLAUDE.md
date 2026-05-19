@@ -416,7 +416,7 @@ Subject-specific layer boundaries, validation commands, language conventions, an
 | `retros/<retro-id>/RETRO_STATE.jsonld` | Per-retro state with chain-hashed `audit[]`. v3.0 final. Override directory via `FNSR_RETRO_DIR` env var. |
 | `archive/retrospectives/<retro-id>.jsonld` | Archived retros (episodic memory per Spec 01 + MAREP §16). v3.0 final. Override via `FNSR_RETRO_ARCHIVE_DIR` env var. |
 | [.claude/agents/](.claude/agents/) | Agent contracts (worker + system) with frontmatter + body. |
-| [surfaces/_primitives/](surfaces/_primitives/) | Substrate primitive docs: BAO (v3.0-alpha.1), Episodic→Semantic Promotion (v3.0-alpha.2), Anti-Pattern Enforcement (v3.0 final). |
+| [surfaces/_primitives/](surfaces/_primitives/) | Substrate primitive docs: BAO (v3.0-alpha.1), Episodic→Semantic Promotion (v3.0-alpha.2), Anti-Pattern Enforcement (v3.0 final), Surface Audience (v3.1.0; originally-scoped trajectory terminal primitive). |
 | [surfaces/retro/](surfaces/retro/) | Retro surface: spec, per-phase specs, per-role bindings. |
 | [tests/](tests/) | Python `unittest` suite. Run `python -m unittest discover tests`. |
 | [PLAYBOOK.md](PLAYBOOK.md) | Operator playbook: failure-mode recognition + recovery patterns from real-world runs. Read this when a chain stalls. |

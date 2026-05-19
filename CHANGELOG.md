@@ -4,6 +4,80 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.1.0 — surface_audience primitive: originally-scoped trajectory terminal release
+
+The originally-scoped trajectory's final release. The substrate's foundational design is complete with v3.1.0. Single-release scope per the original directive; no alpha series. **28 new tests; full suite 472 (was 444 at v3.0).**
+
+The build-incrementally pattern carried through to closure. v2.6.0 → v3.1.0 is the substrate's foundational architecture; what comes after v3.1.0 is either substrate evolution beyond originally-scoped trajectory or substrate stabilization while FNSR-larger-scope work consumes the current foundation.
+
+### Added — fourth substrate primitive doc
+
+**Surface Audience** substrate-primitive doc at [surfaces/_primitives/surface-audience.md](surfaces/_primitives/surface-audience.md). The fourth (and originally-scoped trajectory terminal) substrate-primitive document, joining BAO (v3.0-alpha.1), Episodic→Semantic Promotion (v3.0-alpha.2), and Anti-Pattern Enforcement (v3.0 final).
+
+The primitive declares a closed enumeration for the audience an output targets:
+
+- **`consumer`** — content destined for consumer-facing surfaces (demos, public docs, README, marketing, externally-published artifacts)
+- **`internal`** — everything else (substrate-development; audit entries; operator-facing reports; methodological observations; intermediate work products)
+
+Per the brief: a **per-output field** declared by worker agents, not agent frontmatter. Same agent may emit different audiences across dispatches; the field is per-output, not per-agent. This matters because many agents legitimately produce both consumer and internal content depending on dispatch context.
+
+The primitive declares its three structural properties in parallel construction with anti-pattern enforcement's triad: audience declared at output level (not agent level); substrate validates as closed enumeration; audit chain records every audience declaration.
+
+### Added — `_extract_surface_audience` helper
+
+Located in `fnsr_daemon.py` alongside the other substrate-primitive helpers (`_check_no_*` from v3.0; `_is_retro_surface_task` from alpha.2). Validates the field against `SURFACE_AUDIENCE_VALUES = ("consumer", "internal")`. Returns `SURFACE_AUDIENCE_DEFAULT = "internal"` when the field is absent or outputs is not a dict; raises `ContainmentVeto` with `error: surface_audience_invalid_value` when the field is present with a value outside the closed enumeration.
+
+The conservative-default-with-validation pattern matches v3.0's anti-pattern enforcement framework: substrate decides; agents cannot extend the enum by claiming compliance.
+
+### Added — `_upstream_subject_surface_audience` walker
+
+A helper that walks an UPSTREAM dict for any upstream task's declared `surface_audience` value. Returns the first declared value encountered, or `internal` default when no upstream provides one. Handles both wrapped envelopes (`{"outputs": {...}}`) and bare outputs dicts that the operator may inline directly.
+
+### Added — Verification-ritual records `subject_surface_audience`
+
+The `verification-ritual` system agent now records `subject_surface_audience` in its output payload, reading from UPSTREAM via the walker. The agent's frontmatter `required_outputs` is updated to declare the new field so CPS enforces presence per the substrate's required-keys discipline.
+
+This is the v3.1.0 audit-recording mechanism per the brief ("Verification-ritual records the field"). Future readers querying audit history for per-audience verification statistics can filter on the field without re-parsing source artifacts. v3.2's planned registry enforcement reads from this same audit-event structure.
+
+### Deferred to v3.2 — registry enforcement
+
+Per the original directive split, v3.2 will add:
+
+- Agent frontmatter `produces_consumer: true` declarations (registry)
+- Differential quality gates: consumer outputs pass through additional CPS checks (length budgets per audience; forbidden-internal-jargon scans; documentation-completeness validation)
+- Corpus-wide `TestSurfaceAudienceConformance` validation: frontmatter declarations match actual audit-history usage patterns
+- Refusals on consumer-vs-internal-from-non-declaring-agent mismatches
+
+The enforcement is deliberately deferred: v3.1.0 establishes the primitive (field declared; validated; recorded); v3.2 builds enforcement against a stable foundation. The split matches the substrate-vs-procedure distinction established in prior primitive introductions.
+
+### Changed
+
+- CLAUDE.md gains §7.13 "Surface Audience (v3.1.0; originally-scoped trajectory terminal release)" documenting the field shape, default, validation, and v3.1.0 vs v3.2 split.
+- CLAUDE.md §10 Key Files: `surfaces/_primitives/` row updated to enumerate the fourth primitive.
+- CLAUDE.md §5 Validation: surface-audience enumeration validation + `subject_surface_audience` recording added to the suite-coverage summary.
+- Template-sync default manifest extended with `surfaces/_primitives/surface-audience.md` and `tests/test_v3_1_substrate.py`.
+
+### Substrate self-documentation reaches four primitive docs
+
+The substrate self-documentation initiative that began with `surfaces/_primitives/bounded-authority-orchestrator.md` in v3.0-alpha.1 closes at v3.1.0 with four primitive docs:
+
+- BAO (v3.0-alpha.1)
+- Episodic→Semantic Promotion (v3.0-alpha.2)
+- Anti-Pattern Enforcement (v3.0 final)
+- Surface Audience (v3.1.0)
+
+Plus two corpus-wide pattern-conformance tests (`TestBaoBoundsValidation`, `TestReadOnlyContractValidation`). Future patterns inherit the discipline: drop a primitive doc at `surfaces/_primitives/`; add a corpus-wide validation test if the pattern fits.
+
+### Originally-scoped trajectory closure
+
+v2.6.0 → v3.1.0 is the substrate's originally-scoped trajectory. Six clean releases (v2.6.0, v2.6.1, v2.7.0, v2.8.0, v2.9.0, v3.0) plus the terminal release (v3.1.0). The architectural progression is complete:
+
+- **v2.6.0 → v2.8.0** (first architectural phase): thin coordinator → operates protocol depth at machine speed. Documented in the [v2.6.0 → v2.8.0 retrospective](file:///c:/Users/aaron/OneDrive/Documents/ariadne/archive/retrospectives/2026-05-substrate-v2.6.0-to-v2.8.0.md).
+- **v2.9.0 → v3.0** (second architectural phase): operates protocol depth → self-documents and enforces own architectural discipline. Documented in the [v2.9.0 → v3.0 retrospective addendum](file:///c:/Users/aaron/OneDrive/Documents/ariadne/archive/retrospectives/2026-05-substrate-v2.9.0-to-v3.0.md).
+- **v3.1.0** (terminal release): adds the final originally-scoped substrate primitive. Foundational design complete.
+
+What comes after v3.1.0 is downstream of trajectory closure. Two paths per the v2.9.0 → v3.0 retrospective addendum §7: substrate evolution beyond originally-scoped trajectory, or substrate stabilization while FNSR-larger-scope work consumes the current foundation. The choice depends on what FNSR-larger-scope surfaces as substrate-relevant.
+
 ## v3.0 — MAREP-on-Barcode integration complete: retro surface operationalized + Episodic→Semantic promotion path + anti-pattern enforcement primitive
 
 Final checkpoint of the v3.0 series. Operationalizes the retro surface end-to-end, makes Episodic→Semantic promotion citable in the audit chain, and formalizes the anti-pattern enforcement framework as the third substrate primitive doc per Aaron's CP3 greenlight observations. **33 new tests; full suite 444 (was 411 at v3.0-alpha.2).**
