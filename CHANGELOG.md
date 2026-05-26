@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.2.1 — Fixer escalation-surface fix + bulk-abandon helper
+
+Patch release. Closes a contract design bug surfaced in v3.2.0 operational use within hours of release: 95 of 125 blocked tasks were Fixer tasks themselves emitting `outputs.error: stall_not_recoverable` when judging a stall as operator-territory. CPS treated the error envelope as a structured-error veto → Fixer task became blocked → **no `awaiting_operator_decision` surface fired** → operator never saw the diagnoses. **5 new tests; full suite 541 (was 536).**
+
+Per Aaron 2026-05-26: *"I am noticing a large backlog of blocked items but no Operator decisions. Why are there so many blocked items?"*
+
+### Fixed — Fixer contract: two distinct refusal paths
+
+`.claude/agents/fixer.md` now sharply documents two paths:
+
+- **Path 1 — judgment-based refusal (the common case)**: standard outputs shape with `escalate: true` PLUS populated `options[]` + `recommendation`. The recovery-dispatcher transforms this into `awaiting_operator_decision` shape per CLAUDE.md §7.6. **This is the surface that actually reaches the operator** via `state_admin status`.
+
+- **Path 2 — true contract violation (rare)**: structured `error:` envelope reserved for inability to even diagnose (`anchor_not_found` | `anchor_malformed`). CPS-vetoes the Fixer task; produces blocked status with no operator surface — appropriate ONLY when the anchor is literally unprocessable.
+
+**Removed from error envelope**: `stall_not_recoverable`, `scope_violation`, `recursion_bound_exceeded`. These judgment-based refusals now route through Path 1 so the operator-decision surface fires.
+
+Added a failure-mode mnemonic for the LLM agent: *"Can I diagnose? Can I propose recovery? Does the recovery need operator judgment?"*
+
+### Fixed — recovery-dispatcher emits awaiting_operator_decision shape
+
+`fnsr_daemon.py:_recovery_dispatcher` when `escalate=true`: emits `outputs.status: "awaiting_operator_decision"` with passed-through `options` + `recommendation` from the Fixer. Pre-fix it emitted `{dispatched: 0, escalated: true}` which didn't trigger the operator-decision surface.
+
+Includes fallback synthesis when Fixer omits `options` / `recommendation` (prevents shape-validation failure from a non-compliant Fixer LLM response).
+
+### Added — `state_admin abandon-stale-fixers` cleanup helper
+
+Operator command to bulk-abandon blocked Fixer tasks emitting deprecated judgment-refusal codes from v3.2.0. Targets `agent=fixer AND status=blocked AND outputs.error in {stall_not_recoverable, scope_violation, recursion_bound_exceeded}`. Also abandons paired `recovery-dispatcher` tasks depending on the abandoned Fixers. `--dry-run` for preview; emits `task_abandoned` audit events.
+
+```bash
+python state_admin.py abandon-stale-fixers --dry-run
+python state_admin.py abandon-stale-fixers
+```
+
+### Net operational impact
+
+Future Fixer escalations populate the operator-decision surface correctly. `state_admin status` will show `awaiting_operator_decision (N)` with the Fixer's options + recommendation, instead of a quiet accumulation of blocked Fixer tasks. v3.2.0's deferred 95-blocked-Fixer state in GraphWrite is cleanable via the new helper.
+
+---
+
 ## v3.2.0 — recovery layer: Fixer + chain validator + state-verification gate + phase lifecycle
 
 Substantial v3.2 release closing the operational gap that v3.1.0 exposed: the substrate had excellent **detection** primitives but **no recovery** primitives. Stalls required the orchestrator-Agent to manually compose abandon-and-replace chains; cascade rebuilds consumed task-slots out of proportion to the actual work. v3.2 closes that loop. **64 new tests; full suite 536 (was 472 at v3.1.0).**
