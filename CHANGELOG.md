@@ -4,6 +4,94 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.2.0 — recovery layer: Fixer + chain validator + state-verification gate + phase lifecycle
+
+Substantial v3.2 release closing the operational gap that v3.1.0 exposed: the substrate had excellent **detection** primitives but **no recovery** primitives. Stalls required the orchestrator-Agent to manually compose abandon-and-replace chains; cascade rebuilds consumed task-slots out of proportion to the actual work. v3.2 closes that loop. **64 new tests; full suite 536 (was 472 at v3.1.0).**
+
+Per Aaron 2026-05-26 root-cause framing: *"The ONLY valid stop is 'Here is the Demo' or 'Here are the revisions you requested' or 'Here is a MAJOR pivot Point' We have made many changes to the Daemon and the system but it keeps stopping WHY?"* — followed by the architectural insight: *"Why can the Daemon not route a stall to the architect to patch?"* and the calibration: *"make a specific Recovery 'Fixer' persona to keep the Architect 'pure'."*
+
+### Added — Fixer agent + recovery-dispatcher system agent
+
+**`fixer`** worker agent (`.claude/agents/fixer.md`). Fourth instance of the read-only-by-contract agent pattern (after reconnaissance, verification-ritual-llm, adversarial-critic). Reads failed/blocked task outputs + audit chain + daemon logs; diagnoses root cause; proposes a validator-eligible `recovery_chain` — or escalates via `escalate: true` when judgment is operator-territory. Opus tier. Documents 5 known stall patterns (apply_partial_failure; TS-compile errors; dispatch_impossible cascade; CPS veto with substantive content; novel unknown) + structured-error refusal envelope (`scope_violation` | `anchor_not_found` | `stall_not_recoverable` | `recursion_bound_exceeded`).
+
+**`recovery-dispatcher`** system agent. Third system agent with externally-visible side effects (alongside `applier` and `retro-applier`). Consumes Fixer's `recovery_chain` output, validates via `fnsr_chain_validator` (PRED-1 through PRED-6), append-tasks on PASS, escalates on FAIL or fixer's `escalate: true`. Idempotent via PRED-5 collision detection.
+
+**Daemon-side auto-dispatch hook** in `run_one_cycle`. When `next_ready_task` returns None AND eligible stalls exist with remaining recursion budget, the daemon auto-queues a `(fixer, recovery-dispatcher)` pair. Recursion bound `FIXER_RECURSION_BOUND = 2` per anchor; oldest stall picked first; stale residue (>24h) excluded; abandoned tasks excluded. Honors `FNSR_AUTO_FIXER` env var (default `on`; set `off` to disable). Emits `fixer_auto_dispatched` audit event on the anchor task for recursion-bound counting.
+
+Validated in production immediately after merge: Fixer autonomously dispatched twice on real stalls (retro-delivery + retro-risk length-budget vetoes); both recovery chains validator-PASS; both recovery tasks appended without operator intervention. **First autonomous recovery cycle in substrate history.**
+
+### Added — Pre-Dispatch Chain Validator
+
+**`fnsr_chain_validator.py`**: pure-Python predicates over a chain JSON + current state.jsonld. Six predicates, each mapped to a real cascade failure observed in operational use:
+
+- **PRED-1 applier-source-in-depends**: every `agent==applier` task with `inputs.source_task` MUST include that task in `depends_on` (caught the v1→v2 cascade trigger: source_not_in_upstream veto)
+- **PRED-2 windows-npm-bare**: on Windows, test-runner `inputs.cmd` starting with bare `npm` will fail `subprocess.run(shell=False)`; suggests absolute `npm.cmd` path (caught the v3→v4 cascade: WinError 2)
+- **PRED-3 deps-alive**: every `depends_on` ID must resolve to a task that is alive (not blocked/failed/abandoned) (caught the v4→v5 recon-front cascade)
+- **PRED-4 required-inputs**: per-agent required `inputs.*` fields (architect→mode; applier→source_task; test-runner→cmd; verification-ritual-llm→mode)
+- **PRED-5 no-id-collisions**: no `@id` duplication within the chain OR against existing state.jsonld
+- **PRED-6 no-circular-deps**: chain dep graph acyclic
+
+Operator surface: `state_admin verify-chain <chain.json>` + `--verify-first` flag on `append-tasks`. The Fixer's `recovery_chain` proposals are gated by this validator before append.
+
+### Added — State Verification Gate (SVG) primitive + probe
+
+**`surfaces/_primitives/state-verification-gate.md`** blueprint + **`fnsr_state_verification.py`** v3.1.0-bridge probe. Deterministic Python predicates that compare canonical-doc claims against observable substrate / git state. Six predicates initially (SVG-1.1, SVG-1.2, SVG-2.1, SVG-3.1, SVG-7.1, SVG-7.3) covering: phase-status-vs-git-commits drift; phase-complete-with-open-OEDs drift; commit-gap (applier landed src/ changes; uncommitted diff); push-gap; phase-state-vs-deploy-evidence; phase-state-vs-canonical-doc.
+
+Self-alerts only; never self-mutates canonical docs (AP-SVG-1, AP-SVG-2, AP-SVG-3 guardrails enforce). v3.2 substrate adds daemon-side dispatch gate; v3.1.0-bridge ships the operator-invocable probe.
+
+### Added — Phase Lifecycle Orchestration (PLO) primitive + bridge
+
+**`surfaces/_primitives/phase-lifecycle-orchestration.md`** blueprint + `state_admin phase` subcommand family (`implementing` / `demo-released` / `po-satisfied` / `retro-complete` / `drift-reconciled` / `close` / `status` / `history`). Seven-state phase machine with operator-emit transitions; emits `phase_state_changed` audit events. AP-PLO-2 enforced: `phase close` refuses unless state == drift-reconciled (structural enforcement of AP-SVG-3's no-lying-canonical-doc rule).
+
+First substrate-tracked phase close in audit history landed via PLO: Phase 2 (Browser UI Foundation) traversed `implementing → demo-released → po-satisfied → retro-complete → drift-reconciled → closed` per Aaron 2026-05-26 product-owner declaration.
+
+v3.2 substrate adds the daemon-side auto-chain pre-queue (when `po-satisfied` event detected, daemon pre-queues retro→SVG-probe→close→next-phase-scaffold with operator-confirmation gates); v3.1.0-bridge ships the manual operator-typed flow.
+
+### Added — Daemon-Orchestrator Stall-Notification primitive
+
+**`surfaces/_primitives/daemon-orchestrator-stall-notification.md`** blueprint + **`fnsr_stall_watch.py`** v3.1.0-bridge watchdog. Operator-invocable probe that classifies the current substrate state as `running` / `demo_pause` / `demo_pause_with_stale_residue` / `stall_with_work` / `stall_dispatch_impossible`. Four stall categories detected (dispatch-impossible-by-deps, hung-in-progress, Pass-2a-gated, developer-output-truncated). Composes with SVG probe via inline call.
+
+The Fixer auto-dispatch hook is the v3.2 evolution of this primitive — same detection categories now drive autonomous recovery instead of just operator-facing reports.
+
+### Added — Stakeholder Feedback Round protocol v0.3 (feedback-rounds surface)
+
+**`surfaces/feedback-rounds/spec.md`** + **`surfaces/feedback-rounds/surface-spec.md`** (FNSR Spec 08 v0.3). Captures the protocol for handling stakeholder feedback rounds: capture → atomic decomposition → semantic-sme review (mandatory upstream of developer for ontology-content items per AP-7) → operator adjudication → implementation chains.
+
+### Added — Opus-tier judgment agents
+
+Four agents bumped from `sonnet` to `opus` based on operational evidence that their judgments are highest-stakes:
+
+- `architect` (ratification rulings gate Pass 2b applier dispatch)
+- `semantic-sme` (Spec 08 v0.3 mandatory upstream; caught OWL Full violations the architect missed)
+- `adversarial-critic` (Cat-9 second-pass; safety net against LLM-judge inconsistency)
+- `synthesist` (BAO instance; N-stream reconciliation)
+
+Per Aaron 2026-05-24 directive: "lets bump op the architect and semantic-sme they are KEY" + follow-up "agree with your other candidates bump them up too."
+
+### Changed — Daemon Pass 2a gating in `next_ready_task`
+
+Applier-class tasks (Pass 2b commit-finalize) are now structurally gated by their upstream architect-ratification dep's ruling. Pre-fix: daemon dispatched applier when deps were `status=done`, ignoring `outputs.ruling` — three distinct denials in Round 4 each landed changes the architect had refused. New `_architect_ratification_block(task, by_id)` helper detects applier tasks whose upstream architect ratification ruling != "ratified" and skips them. The applier task stays `status=ready`; operator-action required.
+
+8 regression tests (`TestPassRatificationGating`).
+
+### Changed — CPS sequence: `awaiting_operator_decision` bypasses `required_outputs`
+
+Operator-decision handoff shape (per CLAUDE.md §7.6) now correctly bypasses the `required_outputs` CPS check. Pre-fix: developer correctly used `outputs.status: "awaiting_operator_decision"` shape; CPS still vetoed for missing required_outputs (substrate-vs-spec mismatch). Now the shape is validated for well-formedness first; valid shapes commit cleanly.
+
+3 regression tests (`TestCpsCheckAwaitingDecisionBypass`).
+
+### Changed — Template-sync manifest extended
+
+Manifest now covers all v3.2 substrate-content files: `fnsr_chain_validator.py`, `fnsr_stall_watch.py`, `fnsr_state_verification.py`, `.claude/agents/fixer.md`, `.claude/agents/recovery-dispatcher.md`, the three new primitive blueprints, `surfaces/feedback-rounds/*`, and test modules.
+
+### Net operational impact
+
+Cascade rebuild pattern that consumed ~71 task slots in Round 5 (4 manual abandon-and-replace cycles for 7 implementation chains) **collapses** to: daemon detects stall → auto-dispatches Fixer → Fixer proposes recovery → validator gates → daemon dispatches recovery. Operator surfaces only at Aaron's three genuine validation points: **Demo / Revisions / Major Pivot.** Everything else flows.
+
+The "we stopped again" pattern across the GraphWrite sessions does not vanish entirely — it gets transformed: now stops are either (a) the substrate working as designed (queue empty between operator turns) or (b) the Fixer escalating because the underlying issue is operator-territory (contract calibration; ratified-scope change; novel failure mode). Mechanical stops auto-recover.
+
+---
+
 ## v3.1.0 — surface_audience primitive: originally-scoped trajectory terminal release
 
 The originally-scoped trajectory's final release. The substrate's foundational design is complete with v3.1.0. Single-release scope per the original directive; no alpha series. **28 new tests; full suite 472 (was 444 at v3.0).**

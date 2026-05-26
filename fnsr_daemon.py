@@ -145,6 +145,46 @@ def _empty_state() -> dict[str, Any]:
 
 # ---------- Deterministic routing ----------------------------------------
 
+def _architect_ratification_block(
+    task: dict[str, Any], by_id: dict[str, dict[str, Any]]
+) -> Optional[tuple[str, Any]]:
+    """Pass 2a gating per FNSR Spec 03 + OPERATOR-MEDIATION-LOG Event 11.
+
+    If the task is an applier-class task (Pass 2b commit-finalize) and any
+    upstream architect-ratification dep has `outputs.ruling != "ratified"`,
+    return `(architect_dep_id, ruling)` indicating the block. Return None
+    when no block applies.
+
+    The architect's ratification ruling MUST gate the Pass 2b applier
+    dispatch. Before this check, the daemon dispatched the applier when
+    deps were `status=done`, ignoring the architect's `outputs.ruling`.
+    Five-plus occurrences in the Round 4 implementation session — every
+    denied/deferred ratification was followed by the applier landing
+    changes the architect had refused.
+    """
+    if task.get("agent") != "applier":
+        return None
+    for dep_id in task.get("depends_on", []) or []:
+        dep = by_id.get(dep_id)
+        if dep is None:
+            continue
+        if dep.get("agent") != "architect":
+            continue
+        dep_inputs = dep.get("inputs") or {}
+        mode = (
+            dep_inputs.get("mode") if isinstance(dep_inputs, dict) else None
+        )
+        if mode != "ratification":
+            continue
+        outputs = dep.get("outputs") or {}
+        ruling = (
+            outputs.get("ruling") if isinstance(outputs, dict) else None
+        )
+        if ruling != "ratified":
+            return (dep_id, ruling)
+    return None
+
+
 def next_ready_task(state: dict[str, Any]) -> Optional[dict[str, Any]]:
     """
     Deterministic task picker. Filters by `status=ready` and all deps `done`,
@@ -155,6 +195,12 @@ def next_ready_task(state: dict[str, Any]) -> Optional[dict[str, Any]]:
     SPL v0.1: priority-as-int is the smallest plan-language step that
     gives operators routing control without introducing a separate plan
     object. Phase / branch / conditional structure is future work.
+
+    Pass 2a gating (Spec 03; Event 11 fix): applier-class tasks whose
+    upstream architect-ratification dep has `outputs.ruling != "ratified"`
+    are SKIPPED — the architect's denial/deferral blocks the Pass 2b
+    commit-finalize. The applier task stays `status=ready` (no mutation);
+    operator-action is required to either abandon or re-dispatch.
     """
     by_id = {t["@id"]: t for t in state.get("tasks", [])}
     done_ids = {tid for tid, t in by_id.items() if t.get("status") == "done"}
@@ -163,8 +209,13 @@ def next_ready_task(state: dict[str, Any]) -> Optional[dict[str, Any]]:
         if t.get("status") != "ready":
             continue
         deps = t.get("depends_on", []) or []
-        if all(d in done_ids for d in deps):
-            candidates.append(t)
+        if not all(d in done_ids for d in deps):
+            continue
+        # Pass 2a gating: skip applier tasks whose architect ratification
+        # did not return ruling=ratified.
+        if _architect_ratification_block(t, by_id) is not None:
+            continue
+        candidates.append(t)
     if not candidates:
         return None
     return min(candidates, key=lambda t: (-int(t.get("priority", 0)), t["@id"]))
@@ -721,11 +772,25 @@ def cps_check(task: dict[str, Any], proposed_outputs: Any) -> None:
                 f"agent reported structured error: {err!r}"
             )
         agent_name = task.get("agent")
-        if agent_name:
+        inputs = task.get("inputs") or {}
+        # CLAUDE.md §7.6: when an agent returns the
+        # awaiting_operator_decision shape, it is explicitly handing back
+        # to the operator and is NOT expected to satisfy its frontmatter
+        # `required_outputs`. The shape is validated for well-formedness
+        # (non-empty options + non-empty recommendation); malformed shapes
+        # raise their own veto. Anti-pattern checks still apply below.
+        is_awaiting = (
+            proposed_outputs.get("status") == "awaiting_operator_decision"
+        )
+        if is_awaiting:
+            shape_err = _validate_awaiting_decision_shape(proposed_outputs)
+            if shape_err is not None:
+                raise ContainmentVeto(shape_err)
+            # Valid awaiting_operator_decision: bypass required_outputs.
+        elif agent_name:
             # Multi-mode agents (architect: review|ratification) declare
             # required_outputs keyed by mode in frontmatter. The task's
             # inputs.mode selects which list applies.
-            inputs = task.get("inputs") or {}
             mode = inputs.get("mode") if isinstance(inputs, dict) else None
             required = _agent_required_outputs(agent_name, mode=mode)
             missing = [k for k in required if k not in proposed_outputs]
@@ -3154,6 +3219,155 @@ def _retro_apply(task: dict[str, Any],
     }, "", "")
 
 
+def _recovery_dispatcher(task: dict[str, Any],
+                          upstream: dict[str, Any]) -> "WorkerResult":
+    """Consume a fixer agent's recovery_chain; validate via fnsr_chain_validator;
+    append-tasks on PASS; escalate on FAIL or fixer's escalate=true.
+
+    Third system agent with externally-visible side effects (alongside applier
+    and retro-applier). Per surfaces/_primitives/state-verification-gate.md
+    (chain validator gate) + .claude/agents/recovery-dispatcher.md.
+
+    Inputs:
+      source_task : str  <- @id of upstream fixer task (must be in depends_on
+                            for UPSTREAM resolution)
+      anchor_task : str? <- originally-failing task @id (informational)
+
+    Reads fixer's outputs.recovery_chain + outputs.escalate. Emits:
+      {dispatched: N, escalated: bool, validator_report: {...}, summary: ...}
+
+    Safety guarantees:
+      - No state.jsonld task append if validator FAILS
+      - No retry on validator failure (escalates instead)
+      - Idempotent: re-run on same source_task produces same outcome
+        (the second run's recovery_chain would FAIL PRED-5 collision)
+    """
+    import json as _json
+    inputs = task.get("inputs") or {}
+    source_task_id = inputs.get("source_task")
+    anchor_task_id = inputs.get("anchor_task")
+    if not source_task_id:
+        return WorkerResult(True, {
+            "error": "missing_source_task",
+            "details": "recovery-dispatcher requires inputs.source_task",
+        }, "", "")
+
+    # Resolve fixer outputs from UPSTREAM
+    src = upstream.get(source_task_id) if isinstance(upstream, dict) else None
+    if src is None:
+        return WorkerResult(True, {
+            "error": "source_not_in_upstream",
+            "source_task": source_task_id,
+            "hint": "add the source task to depends_on",
+        }, "", "")
+    if not isinstance(src, dict):
+        src = {}
+
+    escalate = bool(src.get("escalate", False))
+    recovery_chain = src.get("recovery_chain") or []
+    diagnosis = (src.get("diagnosis") or "")[:500]
+
+    # Honor fixer's explicit escalation request
+    if escalate:
+        return WorkerResult(True, {
+            "dispatched": 0,
+            "escalated": True,
+            "validator_report": None,
+            "summary": ("fixer requested escalation: "
+                         + diagnosis[:200]),
+            "anchor_task": anchor_task_id,
+            "source_task": source_task_id,
+        }, "", "")
+
+    # Empty recovery chain with escalate=false: no-op recovery
+    if not recovery_chain or not isinstance(recovery_chain, list):
+        return WorkerResult(True, {
+            "dispatched": 0,
+            "escalated": False,
+            "validator_report": None,
+            "summary": "fixer proposed no recovery_chain",
+            "anchor_task": anchor_task_id,
+            "source_task": source_task_id,
+        }, "", "")
+
+    # Validate via fnsr_chain_validator (PRED-1 through PRED-6)
+    try:
+        import fnsr_chain_validator
+    except ImportError as e:
+        return WorkerResult(True, {
+            "error": "validator_unavailable",
+            "details": f"fnsr_chain_validator import failed: {e}",
+        }, "", "")
+
+    # Load current state for the validator
+    state_path = os.environ.get("FNSR_STATE", "state.jsonld")
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            current_state = _json.load(f)
+    except (OSError, _json.JSONDecodeError) as e:
+        return WorkerResult(True, {
+            "error": "state_load_failed",
+            "details": str(e),
+        }, "", "")
+
+    validator_report = fnsr_chain_validator.validate_chain(
+        recovery_chain, current_state
+    )
+    validator_summary = {
+        "verdict": validator_report.get("verdict"),
+        "severity_counts": validator_report.get("severity_counts", {}),
+        "findings_count": len(validator_report.get("findings", [])),
+    }
+
+    if validator_report.get("verdict") == "FAIL":
+        # Bad chain — escalate rather than dispatch
+        return WorkerResult(True, {
+            "dispatched": 0,
+            "escalated": True,
+            "validator_report": {
+                **validator_summary,
+                "findings": validator_report.get("findings", [])[:10],
+            },
+            "summary": (
+                f"fixer's recovery_chain FAILED validator: "
+                f"{validator_summary['severity_counts'].get('error', 0)} error(s). "
+                "Escalating to operator review."
+            ),
+            "anchor_task": anchor_task_id,
+            "source_task": source_task_id,
+        }, "", "")
+
+    # PASS — append-tasks
+    existing_ids = {t.get("@id") for t in current_state.get("tasks", [])}
+    appended_ids = []
+    for nt in recovery_chain:
+        if not isinstance(nt, dict) or "@id" not in nt:
+            continue
+        if nt["@id"] in existing_ids:
+            continue  # validator should've caught; defense in depth
+        current_state["tasks"].append(nt)
+        appended_ids.append(nt["@id"])
+
+    # Atomic write via tmp + replace (matches state_admin._save_state pattern)
+    tmp = state_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(current_state, f, indent=2)
+    os.replace(tmp, state_path)
+
+    return WorkerResult(True, {
+        "dispatched": len(appended_ids),
+        "escalated": False,
+        "validator_report": validator_summary,
+        "summary": (
+            f"recovery dispatched: {len(appended_ids)} task(s) appended "
+            f"to state.jsonld. anchor={anchor_task_id}"
+        ),
+        "anchor_task": anchor_task_id,
+        "source_task": source_task_id,
+        "recovery_chain_ids": appended_ids,
+    }, "", "")
+
+
 SYSTEM_AGENTS = {
     "applier": _apply_changes,
     "mojibake-repair": _mojibake_repair,
@@ -3162,6 +3376,7 @@ SYSTEM_AGENTS = {
     "test-runner": _test_runner,
     "git-committer": _git_committer,
     "retro-applier": _retro_apply,
+    "recovery-dispatcher": _recovery_dispatcher,
 }
 
 
@@ -3275,12 +3490,247 @@ def _scan_for_result(text: str) -> Optional[Any]:
     return first_obj
 
 
+# ---------- Fixer auto-dispatch (Spec 09 v3.2-bridge) --------------------
+# When the picker returns None and stalled tasks exist with remaining
+# recursion budget, daemon auto-queues a (fixer, recovery-dispatcher)
+# pair. The fixer diagnoses + proposes recovery_chain; the dispatcher
+# validates via fnsr_chain_validator and append-tasks on PASS.
+# Per Aaron 2026-05-26: "why can the Daemon not route a stall to the
+# architect to patch?" — split into a dedicated `fixer` persona to keep
+# architect ratification scope pure.
+
+FIXER_RECURSION_BOUND = 2  # max fixer attempts per anchor
+FIXER_STALE_HOURS = 24  # skip blocked tasks older than this (residue)
+
+
+def _count_fixer_attempts(state: dict[str, Any], anchor_id: str) -> int:
+    """Count prior fixer_auto_dispatched events for the anchor task."""
+    count = 0
+    for t in state.get("tasks", []) or []:
+        if t.get("@id") != anchor_id:
+            continue
+        for h in t.get("history", []) or []:
+            if h.get("event") == "fixer_auto_dispatched":
+                count += 1
+    return count
+
+
+def _stalls_eligible_for_fixer(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return list of {anchor_id, stall_kind, age_hours} for stalls
+    eligible for fixer dispatch. Filters out: stale residue (>24h),
+    awaiting_operator_decision (operator territory), abandoned tasks,
+    and tasks that already have fixer dispatches in audit."""
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    candidates = []
+    for t in state.get("tasks", []) or []:
+        st = t.get("status")
+        if st not in ("blocked", "failed"):
+            continue
+        # Get most-recent history ts for age
+        last_ts_str = None
+        for h in reversed(t.get("history", []) or []):
+            if h.get("ts"):
+                last_ts_str = h.get("ts")
+                break
+        if not last_ts_str:
+            continue
+        try:
+            last_ts = _dt.datetime.fromisoformat(
+                last_ts_str.replace("Z", "+00:00")
+            )
+        except ValueError:
+            continue
+        age_hours = (now - last_ts).total_seconds() / 3600
+        if age_hours > FIXER_STALE_HOURS:
+            continue  # stale residue
+        # Skip if event is abandon (operator-initiated)
+        last_evt = None
+        for h in reversed(t.get("history", []) or []):
+            if h.get("event"):
+                last_evt = h.get("event")
+                break
+        if last_evt == "task_abandoned":
+            continue
+        # Determine stall_kind from outputs
+        outputs = t.get("outputs") or {}
+        err = outputs.get("error") if isinstance(outputs, dict) else None
+        if err == "apply_partial_failure":
+            stall_kind = "apply_partial_failure"
+        elif err == "source_not_in_upstream":
+            stall_kind = "source_not_in_upstream"
+        elif outputs.get("status") == "errors" and outputs.get("returncode") is None:
+            stall_kind = "test_runner_errors"
+        elif last_evt == "cps_veto":
+            stall_kind = "cps_veto"
+        else:
+            stall_kind = "unknown"
+        candidates.append({
+            "anchor_id": t.get("@id"),
+            "stall_kind": stall_kind,
+            "age_hours": round(age_hours, 1),
+        })
+    return candidates
+
+
+def _next_task_id_num(state: dict[str, Any]) -> int:
+    """Find the max numeric prefix in @ids; return next available."""
+    max_n = 0
+    for t in state.get("tasks", []) or []:
+        tid = t.get("@id", "")
+        parts = tid.split(":")[-1].split("-")
+        try:
+            n = int(parts[0])
+            if n > max_n:
+                max_n = n
+        except ValueError:
+            pass
+    return max_n + 1
+
+
+def _auto_queue_fixer_pair(
+    state: dict[str, Any], anchor_id: str, stall_kind: str,
+    age_hours: float, prior_attempts: int
+) -> tuple[str, str]:
+    """Append (fixer, recovery-dispatcher) pair to state.tasks.
+    Records fixer_auto_dispatched audit event on anchor's history.
+    Returns (fixer_id, dispatcher_id).
+
+    Fixer's depends_on is empty (it reads state.jsonld directly via Read
+    tool; doesn't need UPSTREAM for the anchor since anchor is
+    blocked/failed and would dead-end the dep). Dispatcher's depends_on
+    includes fixer (UPSTREAM-resolves recovery_chain).
+    """
+    anchor_short = anchor_id.split(":")[-1][:30]
+    next_n = _next_task_id_num(state)
+    fixer_id = f"urn:fnsr:task:{next_n}-fixer-auto-{anchor_short}"
+    dispatcher_id = f"urn:fnsr:task:{next_n+1}-recovery-dispatch-{anchor_short}"
+
+    fixer_task = {
+        "@id": fixer_id,
+        "agent": "fixer",
+        "status": "ready",
+        "priority": 50,  # Recovery preempts normal work
+        "depends_on": [],
+        "inputs": {
+            "anchor_task": anchor_id,
+            "stall_kind": stall_kind,
+            "prior_recovery_attempts": prior_attempts,
+            "age_hours": age_hours,
+            "purpose": (
+                f"Diagnose stall on {anchor_id} (stall_kind={stall_kind}, "
+                f"prior_attempts={prior_attempts}). Propose validator-eligible "
+                "recovery_chain OR escalate. Read state.jsonld via Read tool "
+                "to find the anchor task's outputs + history. Daemon "
+                "auto-dispatched per Spec 09 v3.2-bridge."
+            ),
+        },
+    }
+    dispatcher_task = {
+        "@id": dispatcher_id,
+        "agent": "recovery-dispatcher",
+        "status": "ready",
+        "priority": 50,
+        "depends_on": [fixer_id],
+        "inputs": {
+            "source_task": fixer_id,
+            "anchor_task": anchor_id,
+        },
+    }
+    state.setdefault("tasks", []).append(fixer_task)
+    state["tasks"].append(dispatcher_task)
+
+    # Record fixer_auto_dispatched event on anchor task for recursion counting
+    anchor = None
+    for t in state["tasks"]:
+        if t.get("@id") == anchor_id:
+            anchor = t
+            break
+    if anchor is not None:
+        prev_hash = _last_hash(anchor)
+        payload = {
+            "fixer_task": fixer_id,
+            "dispatcher_task": dispatcher_id,
+            "stall_kind": stall_kind,
+            "prior_attempts": prior_attempts,
+            "age_hours": age_hours,
+        }
+        new_hash = hiri_sign(prev_hash, {
+            "event": "fixer_auto_dispatched",
+            "payload": payload,
+        })
+        anchor.setdefault("history", []).append({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "event": "fixer_auto_dispatched",
+            "payload": payload,
+            "prev_hash": prev_hash,
+            "chain_hash": new_hash,
+        })
+
+    return (fixer_id, dispatcher_id)
+
+
+def _try_auto_fixer_dispatch(state: dict[str, Any]) -> Optional[tuple[str, str]]:
+    """If the picker has nothing AND there are stalls with recursion budget,
+    auto-queue one (fixer, dispatcher) pair. Returns (fixer_id, dispatcher_id)
+    if queued, None if no action taken.
+
+    Respects FNSR_AUTO_FIXER env var (default 'on'; set 'off' to disable)."""
+    if os.environ.get("FNSR_AUTO_FIXER", "on").lower() in ("off", "false", "0"):
+        return None
+    stalls = _stalls_eligible_for_fixer(state)
+    if not stalls:
+        return None
+    # Pick the OLDEST stall first (longest-suffering wins)
+    stalls.sort(key=lambda s: -s.get("age_hours", 0))
+    for stall in stalls:
+        anchor_id = stall["anchor_id"]
+        attempts = _count_fixer_attempts(state, anchor_id)
+        if attempts >= FIXER_RECURSION_BOUND:
+            continue  # Recursion bound; operator territory
+        # Check we haven't already dispatched a fixer that's still pending
+        # (avoid double-dispatch in same idle cycle)
+        already_pending = False
+        for t in state.get("tasks", []) or []:
+            if t.get("agent") != "fixer":
+                continue
+            if t.get("status") in ("done", "abandoned"):
+                continue
+            t_inputs = t.get("inputs") or {}
+            if t_inputs.get("anchor_task") == anchor_id:
+                already_pending = True
+                break
+        if already_pending:
+            continue
+        # Auto-queue
+        fixer_id, dispatcher_id = _auto_queue_fixer_pair(
+            state, anchor_id, stall["stall_kind"],
+            stall["age_hours"], attempts
+        )
+        log.info(
+            "auto-dispatched fixer for stalled anchor %s "
+            "(stall_kind=%s, attempt=%d/%d)",
+            anchor_id, stall["stall_kind"],
+            attempts + 1, FIXER_RECURSION_BOUND
+        )
+        return (fixer_id, dispatcher_id)
+    return None
+
+
 # ---------- Task runner --------------------------------------------------
 
 def run_one_cycle() -> bool:
     with locked_state() as state:
         task = next_ready_task(state)
         if task is None:
+            # No dispatchable work — try the fixer auto-dispatch hook.
+            # If we queued a fixer pair, return True so the next cycle
+            # immediately picks up the fixer task (high-priority).
+            # locked_state() auto-saves on context exit; no explicit
+            # save needed here.
+            queued = _try_auto_fixer_dispatch(state)
+            if queued is not None:
+                return True
             return False
         task["status"] = "in_progress"
         task["attempts"] = task.get("attempts", 0) + 1

@@ -11,6 +11,8 @@ Thumbs.db
 state.jsonld.lock
 fnsr.pid
 fnsr_test.pid
+fnsr.stall_status.json
+fnsr.svg_status.json
 raw_output.txt
 
 # Per-user Claude Code preferences (allowlist; not portable)
@@ -19,3 +21,40 @@ raw_output.txt
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Operator scratch workitems (task chain dispatch JSONs; not project artifacts)
+# Phase 1 used phase1-task-*-chain.json + variants for dispatch payloads.
+# Phase 3 uses phase3-*-chain.json / phase3-*-chain-*.json / feedback-response-chain.json patterns.
+# These are operator-side workitems; the canonical record is in state.jsonld's audit chain.
+phase*-task-*.json
+phase*-chain*.json
+phase*-*.json
+feedback-response-chain.json
+
+# Playwright run artifacts (screenshots / traces on failure; per-run; not source-of-truth)
+test-results/
+playwright-report/
+
+# Internal operator scratch
+.claude/scheduled_tasks.lock
+
+# Round N chain dispatch JSONs + generators (operator scratch; canonical record in state.jsonld)
+round*-chain-*.json
+round*-chains.json
+round*-chains-build.py
+round*-chains-fix.json
+round*-chains-fix.py
+round*-chains-v5.json
+round*-chains-v5-build.py
+round*-chains-v5-abandon.sh
+round*-c6-retry.json
+round*-c6-retry-build.py
+round*-c6-retry-abandon.sh
+round*-cmd-fix.json
+round*-cmd-fix-build.py
+round*-cmd-fix-abandon.sh
+round*-sme-review-task.json
+phase-*-retro-chain.json
+feedback-round-*-decomposition-chain.json
+fnsr-spec-*-chain.json
+r43-split-tmp.txt
