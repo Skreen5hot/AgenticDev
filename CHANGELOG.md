@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.2.2 — `state_admin reset-fixer-attempts` + reset-aware counting
+
+Closes the gap v3.2.1 left: the escalation-surface fix was correct prospectively but couldn't retroactively repair prior-cycle dispatcher outputs. **6 new tests; full suite 547 (was 541).**
+
+Per Aaron 2026-05-29 (3-day idle gap): *"I have been gone for some time what is the current status"* — investigation revealed that 494 (Phase 3 apply_partial_failure) and 486/487 (retro length-budget anchors) had 2 `fixer_auto_dispatched` events EACH from v3.2.0 dispatchers that emitted old-shape outputs (`{escalated:true}`) instead of the `awaiting_operator_decision` shape. Recursion bound (2 per anchor) was exhausted on all three anchors. Daemon went idle for ~3 days. No operator surface ever populated for the escalations because the dispatcher outputs landed before v3.2.1 shipped.
+
+### Added — `state_admin reset-fixer-attempts <anchor> --reason "..."`
+
+Operator-emitted reset for the Fixer recursion bound. Appends a `fixer_attempts_reset` audit event on the anchor task's history. The daemon's `_count_fixer_attempts` honors the reset: only `fixer_auto_dispatched` events emitted AFTER the most recent reset count toward `FIXER_RECURSION_BOUND`.
+
+Append-only: the reset does NOT rewrite prior chain hashes. The audit chain records both the prior attempts AND the operator's reset decision, preserving integrity per the substrate's audit-integrity commitment.
+
+Output records `prior_attempt_count_cleared` in the event payload so the audit chain shows exactly what was zeroed.
+
+```bash
+python state_admin.py reset-fixer-attempts urn:fnsr:task:494-apply-p3-c1-tsfix \
+    --reason "v3.2.1 escalation-surface fix landed; v3.2.0 dispatcher outputs are stale"
+```
+
+### Use case
+
+After a Fixer-contract patch (v3.2.1 landed the escalation-surface fix; v3.2.2 patterns extend to future contract patches), prior-cycle attempts no longer reflect what the current Fixer would do. Reset clears the recursion bound; daemon dispatches a fresh Fixer that escalates correctly via the v3.2.1 path; the operator-decision surface populates as designed.
+
+### Net operational impact
+
+`reset-fixer-attempts` is the substrate's escape hatch for "stuck on stale Fixer attempts after a contract patch." It's the substrate-discipline-respecting alternative to manually editing audit history. Without it, every Fixer-contract patch forces operators to either (a) wait for the natural reset event (never) or (b) hand-edit state.jsonld (violates append-only). v3.2.2 makes the operator workflow explicit and auditable.
+
+---
+
 ## v3.2.1 — Fixer escalation-surface fix + bulk-abandon helper
 
 Patch release. Closes a contract design bug surfaced in v3.2.0 operational use within hours of release: 95 of 125 blocked tasks were Fixer tasks themselves emitting `outputs.error: stall_not_recoverable` when judging a stall as operator-territory. CPS treated the error envelope as a structured-error veto → Fixer task became blocked → **no `awaiting_operator_decision` surface fired** → operator never saw the diagnoses. **5 new tests; full suite 541 (was 536).**
