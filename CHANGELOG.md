@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.3.1 — operator-CLI lock-discipline fix (closes the v3.3.0 validation regression)
+
+**Substrate-discipline patch.** Validating the v3.3.0 operator-decisions emission surface against a live daemon (2026-06-01), `state_admin resolve` on task 760 reported success but the `operator_resolution` audit event never landed and the task stayed `awaiting_operator_decision`. Investigation: `state_admin.py`'s `_load_state` / `_save_state` were naked file I/O. A concurrent daemon `locked_state()` read-modify-write between the operator's load and save silently dropped the operator's mutation. The lock the daemon uses was correct; the operator CLI was bypassing it.
+
+This is the substrate fix per Aaron's standing directive: *"identify cause and fix the Substrate that allowed the stall to happen, not the stall."* Failure-mode taxonomy: silent overwrite of operator intent through asymmetric lock discipline between daemon and CLI.
+
+### Fixed — `state_admin.py` `_load_state` / `_save_state` now hold `state.jsonld.lock` across the critical section
+
+`_load_state(state_path)` opens `state.jsonld.lock`, acquires byte-0 exclusive lock via the daemon's `_acquire_lock` primitive, stashes the fileobj in a module-level `_HELD_LOCKS` dict keyed by resolved path, then reads. `_save_state(state_path, state)` writes atomically, then releases the lock and closes the fileobj. The operator's load → mutate → save is now one OS-locked critical section. Concurrent daemon cycles block on the lock — they do not interleave and overwrite.
+
+Compatible with all 25 mutating commands in `state_admin.py` (cmd_reset / cmd_abandon / cmd_resolve / cmd_bank / cmd_append_tasks / forward-track / retro / phase / promote-candidate). Zero per-command churn — every existing `_load_state(...) ... _save_state(...)` pair automatically gets the lock.
+
+Read-only commands (cmd_status / cmd_verify / cmd_pending / list family) hold the lock until process exit; operator CLI is one-shot, so daemon blocks briefly then resumes. The docstring's prior workaround — *"STOP THE DAEMON before modifying state"* — is no longer required.
+
+### Added — 3 regression tests (`TestOperatorLockDiscipline` in `tests/test_state_admin.py`)
+
+- `test_load_acquires_lock_save_releases` — verifies `_HELD_LOCKS` invariants
+- `test_concurrent_daemon_save_does_not_overwrite_operator_resolve` — operator's mutation survives a simulated concurrent disk write
+- `test_resolve_command_persists_to_disk` — end-to-end: cmd_resolve persists `status=done` to disk
+
+Full suite: **570 tests** (was 567). All pass in both GraphWrite and AgenticDev.
+
+### Banking
+
+`bank-760-recovery-dispatch-752-recon-p3-c1c-1` (category: `discipline-correction`, state 1): *"any substrate component that mutates shared state MUST use the lock primitive the kernel uses."* The discipline was documented in `CLAUDE.md` but not enforced in CLI code — the operator-discipline workaround in the docstring WAS the bug rather than a mitigation.
+
+### Validated end-to-end
+
+After the fix, ran `python state_admin.py resolve urn:fnsr:task:760-... --option 1` against the live daemon. Task transitioned to `status: done`; `operator_resolution` audit event landed at 2026-06-01T10:45:16Z; `state_admin pending` reports zero pending decisions.
+
+---
+
 ## v3.3.0 — operator-decisions emission primitive (closes the 5/24 architectural gap)
 
 Closes the architectural gap Aaron first raised 2026-05-24, reaffirmed 2026-06-01: *"Are we 'emitting' the 'awaiting_operator_decisions' somewhere?"* — honest answer was NO. Substrate stored decisions in state.jsonld but had no emission channel; operator discovered them only by running a probe and asking the orchestrator-Agent to inspect. **7 new tests; full suite 567 (was 560).**
