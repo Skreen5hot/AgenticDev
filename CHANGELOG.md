@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.2.4 — full-history scan for abandon marker (closes v3.2.3 gap)
+
+v3.2.3 patch landed correctly but was incomplete. v3.2.3's filter only checked the *most-recent* history event for the operator_reset abandon marker. When post-abandon noise events (pre-fix Fixer auto-dispatches recovering an abandoned anchor) sat as the most-recent event, v3.2.3 missed the abandon marker. Daemon re-dispatched a Fixer (750) on anchor 495 immediately after v3.2.3 deploy. **1 new test; full suite 550 (was 549).**
+
+### Fixed — substrate semantic clarified: no un-abandon
+
+The substrate has NO un-abandon operation. Once an abandon marker exists in a task's audit history, the task is permanently operator-decided. v3.2.4 codifies this: `_stalls_eligible_for_fixer` scans the FULL history (not just the most-recent event) for either `task_abandoned` literal event OR `operator_reset` with `reset_fields.status` containing `"abandoned"`. A single abandon marker terminates Fixer eligibility forever.
+
+### Test
+
+`test_v3_2_4_full_history_scan_for_abandon_marker` — abandon marker followed by post-abandon Fixer auto-dispatch entry MUST still filter the task out. v3.2.3 (last-event-only) would have wrongly marked eligible; v3.2.4 correctly skips.
+
+### Net operational impact
+
+Closes the upstream filter bug definitively. v3.2.0's 95-task Fixer-for-Fixer cascade root cause is now eliminated.
+
+---
+
 ## v3.2.3 — `_stalls_eligible_for_fixer` recognizes state_admin abandon
 
 Closes a Fixer-on-abandoned cascade discovered immediately after v3.2.2's batch operator-decision cleanup. **2 new tests; full suite 549 (was 547).**
