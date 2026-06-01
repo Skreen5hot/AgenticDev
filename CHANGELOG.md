@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.2.5 — substrate-discipline fixes: exception isolation, silent-crash detection, per-branch test matrix
+
+Closes three substrate-discipline gaps that ALLOWED v3.2.4's NameError to silently disable the recovery layer. Per Aaron 2026-06-01 directive: *"I want you to identify cause and fix the Substrate that allowed the stall to happen"* — this release addresses the WHY, not just the symptom. **10 new tests; full suite 560 (was 550).**
+
+### Fixed — Gap A: exception isolation in daemon main loop
+
+`run_one_cycle` now wraps `_try_auto_fixer_dispatch` in try/except. Pre-v3.2.5, an exception in any Fixer-helper function bubbled to the main loop and effectively crashed it on every iteration while `daemon_alive` remained `True` (process existed). v3.2.5 catches the exception, logs to `daemon.stderr.log`, treats the cycle as idle, and the daemon continues polling. **The recovery layer can now have bugs without the recovery layer becoming entirely disabled.**
+
+### Fixed — Gap B: watchdog silent-crash detection
+
+`fnsr_stall_watch.py` now computes `silent_crash_suspected = (daemon_alive AND dispatchable_now > 0 AND stable_for_seconds >= 120)`. When the predicate fires, the recommendation reads:
+
+> `ACTION_SILENT_CRASH_SUSPECTED: daemon process exists but state.jsonld has not changed in Xs while dispatchable work is queued. Daemon's main loop likely crashing on every iteration. INSPECT daemon.stderr.log for traceback; restart daemon after patching.`
+
+Pre-v3.2.5, `daemon_alive=True` simply meant "process exists" — couldn't distinguish polling from crashing-every-cycle. Threshold `SILENT_CRASH_THRESHOLD_SECONDS = 120` is configurable per-deploy.
+
+### Fixed — Gap C: per-branch test matrix for `_stalls_eligible_for_fixer` classifier
+
+The v3.2.4 NameError lived in the stall-kind classifier (the `last_evt`-referencing branch). 550 tests passed because all prior tests exercised only the abandon-detection path, which returned early before reaching the classifier. v3.2.5 adds 5 new tests exercising all 5 classifier branches:
+
+- `test_classifier_source_not_in_upstream`
+- `test_classifier_cps_veto_no_outputs_error` (the actual symptom — recon CPS-vetoes)
+- `test_classifier_unknown_fallback`
+- `test_classifier_empty_history_does_not_crash`
+- `test_classifier_all_5_branches_in_one_state` (integration test that alone would have caught v3.2.4)
+
+### Fixed — the v3.2.4 NameError itself
+
+`_stalls_eligible_for_fixer` re-walks history for `last_evt` used by the classifier. v3.2.4 had localized `last_evt` inside the abandon-detection refactor; the classifier below still referenced it. Falls out trivially of Gap C's test matrix.
+
+### Net operational impact
+
+The substrate is now resilient to bugs in its own recovery-layer code. A future bug like v3.2.4's NameError won't silently disable Fixer auto-dispatch — the daemon continues polling, the watchdog flags the silent-crash state explicitly, and operator sees the traceback in `daemon.stderr.log`. **Recovery-layer correctness is a continuous-validation concern, not a single-deploy concern.**
+
+---
+
 ## v3.2.4 — full-history scan for abandon marker (closes v3.2.3 gap)
 
 v3.2.3 patch landed correctly but was incomplete. v3.2.3's filter only checked the *most-recent* history event for the operator_reset abandon marker. When post-abandon noise events (pre-fix Fixer auto-dispatches recovering an abandoned anchor) sat as the most-recent event, v3.2.3 missed the abandon marker. Daemon re-dispatched a Fixer (750) on anchor 495 immediately after v3.2.3 deploy. **1 new test; full suite 550 (was 549).**
