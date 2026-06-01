@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.2.3 — `_stalls_eligible_for_fixer` recognizes state_admin abandon
+
+Closes a Fixer-on-abandoned cascade discovered immediately after v3.2.2's batch operator-decision cleanup. **2 new tests; full suite 549 (was 547).**
+
+Per Aaron 2026-06-01 batch resolution: after 6 anchors were abandoned via `state_admin abandon`, the daemon's next idle cycle auto-dispatched a Fixer on one of them (495) anyway — wasted compute.
+
+### Fixed — recognize `operator_reset` payload-marker
+
+`_stalls_eligible_for_fixer` previously checked `event == "task_abandoned"` to skip operator-initiated abandons. But `state_admin.cmd_abandon` emits `event="operator_reset"` with `reset_fields.status` containing `"abandoned"` — never the literal `task_abandoned` event. The filter never fired; abandoned tasks were re-picked as Fixer-eligible stalls.
+
+**This is the upstream detection bug that produced the original 95-task Fixer-for-Fixer cascade in v3.2.0 operational use.** The v3.2.1 escalation-surface fix and v3.2.2 reset helper addressed downstream symptoms; v3.2.3 closes the upstream filter gap.
+
+### Fix shape
+
+Extended the skip rule to recognize `operator_reset` events whose `reset_fields.status` string contains `"abandoned"`. Legitimate `operator_reset` for retry (`status: "failed -> ready"`) still permits fresh Fixer eligibility — only the abandon-marker variant is excluded.
+
+### Tests
+
+- `test_operator_reset_abandon_excluded`: state_admin-style abandon excluded
+- `test_operator_reset_non_abandon_still_eligible`: retry-style reset still eligible
+
+### Net operational impact
+
+`state_admin abandon` now reliably terminates a task's Fixer-eligibility. Operator-direct cleanup matches operator expectation: abandon means abandoned, no auto-recovery.
+
+---
+
 ## v3.2.2 — `state_admin reset-fixer-attempts` + reset-aware counting
 
 Closes the gap v3.2.1 left: the escalation-surface fix was correct prospectively but couldn't retroactively repair prior-cycle dispatcher outputs. **6 new tests; full suite 547 (was 541).**
