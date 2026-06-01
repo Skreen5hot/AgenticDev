@@ -4,6 +4,97 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.3.2 — resolve→execution link discipline (closes 752-recon-p3-c1c wedge)
+
+**Substrate-discipline patch.** Validating v3.3.1 against a live daemon (2026-06-01), the diagnostic surfaced a deeper gap: `state_admin resolve` closed the `awaiting_operator_decision` surface but did NOT execute the chosen option's recommendation. The operator resolved two dispatcher tasks (758/760 on anchor 752-recon-p3-c1c) via `--option 1`; both resolves committed cleanly; but Option 1's text ("wrap F1 in envelope on 752; mark 752 done") never ran, so 752 stayed `status=blocked` and Chain 1c stayed wedged behind it. No audit linkage between the decision and its execution.
+
+This is the same class of bug as v3.3.1 (mechanism documented but not enforced): operator discipline was relied upon for "do the thing the option says"; the substrate provided no enforcement. Per Aaron's standing directive — *"identify cause and fix the Substrate that allowed the stall to happen, not the stall."*
+
+### Fixed — `state_admin resolve` requires `--execution-mode` declaration
+
+The resolve command now refuses to commit unless the operator declares HOW the chosen option is being executed. Three modes:
+
+```bash
+# Operator queued followup task(s) to execute the option (e.g., a recovery chain):
+python state_admin.py resolve <task-id> --option N \
+    --execution-mode manual-followup-queued \
+    --followup-task-ids id1,id2,...
+
+# Operator already mutated state (e.g., wrapped malformed outputs, marked status=done):
+python state_admin.py resolve <task-id> --option N \
+    --execution-mode state-surgery-applied \
+    --state-surgery-targets id1,id2,... [--reason "..."]
+
+# Option chose "do nothing" / informational close:
+python state_admin.py resolve <task-id> --option N \
+    --execution-mode no-execution-required --reason "..."
+```
+
+Validation per mode:
+- `manual-followup-queued`: each `--followup-task-ids` @id MUST exist in state.jsonld (caught by enumerating the tasks dict at resolve time). Refusal message tells the operator to `state_admin append-tasks` first.
+- `state-surgery-applied`: each `--state-surgery-targets` @id MUST exist in state.jsonld.
+- `no-execution-required`: `--reason` MUST be non-empty.
+
+`argparse` enforces `--execution-mode` as a required arg; missing it triggers a `SystemExit` from the parser before `cmd_resolve` even runs.
+
+### Audit payload extension
+
+The `operator_resolution` audit event payload now carries two new fields:
+
+```json
+{
+  "chosen_option_index": 1,
+  "chosen_option": "wrap-in-envelope",
+  "operator": "operator",
+  "execution_mode": "state-surgery-applied",
+  "execution_payload": {
+    "mode": "state-surgery-applied",
+    "state_surgery_targets": ["urn:fnsr:task:anchor"],
+    "reason": "wrapped F1 into envelope; anchor now done"
+  },
+  "notes": "..."
+}
+```
+
+Downstream agents reading the dispatcher's outputs via UPSTREAM now see the chosen option AND the operator's execution declaration, so they can verify the resolution semantics match the followup state.
+
+### Added — 8 regression tests (`TestResolveExecutionMode` in `tests/test_state_admin.py`)
+
+- `test_argparse_requires_execution_mode` — parser refuses without the arg
+- `test_no_execution_required_requires_reason` — refuses without `--reason`
+- `test_manual_followup_queued_requires_task_ids` — refuses without `--followup-task-ids`
+- `test_manual_followup_refuses_nonexistent_task_id` — refuses if any @id missing from state
+- `test_manual_followup_succeeds_with_existing_task_ids` — happy path; audit payload validated
+- `test_state_surgery_applied_requires_targets` — refuses without `--state-surgery-targets`
+- `test_state_surgery_applied_succeeds` — happy path; audit payload validated
+- `test_state_surgery_refuses_nonexistent_target` — refuses if any target missing
+
+Existing `TestResolveCommand` and `TestOperatorLockDiscipline` tests updated to pass `--execution-mode no-execution-required --reason "..."` (the v3.3.2-canonical default for test scaffolding).
+
+Full suite: **578 tests** (was 570). All pass in both GraphWrite and AgenticDev.
+
+### Added — `_release_state_lock` helper
+
+Early-return error paths in `cmd_resolve` now release the held lock without writing state back. Previously the v3.3.1 fix wrote the unchanged state back on error returns (correct but wasteful and misleading in audit). Helper available for other commands that want the same semantic.
+
+### Documentation
+
+CLAUDE.md §7.6 rewritten to spec the new contract end-to-end including the audit-payload shape and the three execution modes.
+
+### Banking
+
+`bank-760-recovery-dispatch-752-recon-p3-c1c-2` (category: `discipline-correction`, state 1): *"any operator-facing decision surface MUST have an enforcement link between the decision and its execution; the substrate cannot 'close' a decision without the operator declaring how it executes."*
+
+### Validation note: the 752 anchor remains wedged
+
+This v3.3.2 patch does NOT unwedge 752. The patch enforces the discipline going forward; the existing 752 wedge requires either:
+- `state_admin reset urn:fnsr:task:752-recon-p3-c1c --reason "..."` + re-dispatch with correct outputs envelope, OR
+- Direct state-surgery on 752 to wrap its existing claim payload in the recon envelope and flip status to done.
+
+Either action is a Phase 3 unwedge decision, not a substrate fix. Awaiting Aaron's call on the unwedge path.
+
+---
+
 ## v3.3.1 — operator-CLI lock-discipline fix (closes the v3.3.0 validation regression)
 
 **Substrate-discipline patch.** Validating the v3.3.0 operator-decisions emission surface against a live daemon (2026-06-01), `state_admin resolve` on task 760 reported success but the `operator_resolution` audit event never landed and the task stayed `awaiting_operator_decision`. Investigation: `state_admin.py`'s `_load_state` / `_save_state` were naked file I/O. A concurrent daemon `locked_state()` read-modify-write between the operator's load and save silently dropped the operator's mutation. The lock the daemon uses was correct; the operator CLI was bypassing it.
