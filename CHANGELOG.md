@@ -4,6 +4,69 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.3.0 — operator-decisions emission primitive (closes the 5/24 architectural gap)
+
+Closes the architectural gap Aaron first raised 2026-05-24, reaffirmed 2026-06-01: *"Are we 'emitting' the 'awaiting_operator_decisions' somewhere?"* — honest answer was NO. Substrate stored decisions in state.jsonld but had no emission channel; operator discovered them only by running a probe and asking the orchestrator-Agent to inspect. **7 new tests; full suite 567 (was 560).**
+
+Through v3.2.0–v3.2.5 the substrate gained detection (watchdog/SVG/PLO), recovery (Fixer/dispatcher/reset), and the operator-decision SHAPE (CLAUDE.md §7.6). v3.3.0 ships the missing **emission surface** that puts pending decisions in the operator's line of sight without manual inspection.
+
+### Added — `fnsr_operator_decisions.py` renderer module
+
+Pure-Python renderer (read-only over state.jsonld). Walks all `status=awaiting_operator_decision` tasks; extracts anchor / source-fixer / diagnosis / options / recommendation / referenced-evidence from outputs; renders human-readable Markdown grouped by anchor (duplicate Fixer surfaces collapse under one anchor with a note). `emit(state_path)` writes to `fnsr.operator_decisions.md`.
+
+Operator-discoverable: the file lives next to state.jsonld; any editor opening the repo sees it; substrate auto-refreshes on every watchdog probe.
+
+### Added — `state_admin pending [--print]`
+
+On-demand operator command. Invokes the renderer; writes the file; prints summary count. `--print` also dumps full Markdown to stdout for grep-piping.
+
+```bash
+python state_admin.py pending
+# pending decisions: 2 task(s) across 1 anchor(s)
+#   written to: /path/to/fnsr.operator_decisions.md
+```
+
+### Added — watchdog auto-emission + recommendation surfacing
+
+`fnsr_stall_watch.py` calls `fnsr_operator_decisions.emit()` on every probe. When `awaiting_operator_decision > 0`, the watchdog `recommendation` field leads with:
+
+> `PENDING_DECISIONS: N task(s) across M anchor(s) — see fnsr.operator_decisions.md | <rest of recommendation>`
+
+CLI output also adds a `pending_decisions=N (see fnsr.operator_decisions.md)` line. Operator running `python fnsr_stall_watch.py` cannot miss pending decisions even without reading the file.
+
+### Markdown shape
+
+The rendered file has, per anchor:
+- Diagnosis (Fixer's root-cause analysis)
+- Options (numbered; each with label + tradeoff)
+- Recommendation (Fixer's pick + rationale)
+- Rationale (Fixer's structural reasoning)
+- Referenced evidence (paths + audit refs the Fixer cited)
+- **Resolve-via** shell command(s) with the exact `state_admin resolve` invocation including option-index range
+
+For duplicate-anchor cases (two consecutive Fixer attempts on same anchor), the duplicates appear under one anchor section with the resolve-via block listing all the duplicate surfaces to resolve in one motion.
+
+### Operator-discoverability discipline
+
+Any cycle ending with `awaiting_operator_decision > 0` now surfaces `fnsr.operator_decisions.md` automatically through three channels:
+1. Watchdog recommendation leads with `PENDING_DECISIONS: N`
+2. `state_admin pending` command (operator on-demand)
+3. The file itself, present in repo root
+
+The "are we stuck?" question that drove this session's investigation now answers itself: open `fnsr.operator_decisions.md`.
+
+### Tests
+
+- Empty state renders no-decisions message
+- Ignores non-awaiting tasks
+- Single-decision full render (all sections present)
+- Duplicate-anchor surfaces grouped correctly (the actual operational pattern from 6/1)
+- `emit()` writes the file
+- `emit()` handles unreadable state.jsonld gracefully
+- `state_admin pending` CLI end-to-end
+
+---
+
 ## v3.2.5 — substrate-discipline fixes: exception isolation, silent-crash detection, per-branch test matrix
 
 Closes three substrate-discipline gaps that ALLOWED v3.2.4's NameError to silently disable the recovery layer. Per Aaron 2026-06-01 directive: *"I want you to identify cause and fix the Substrate that allowed the stall to happen"* — this release addresses the WHY, not just the symptom. **10 new tests; full suite 560 (was 550).**

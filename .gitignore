@@ -13,6 +13,9 @@ fnsr.pid
 fnsr_test.pid
 fnsr.stall_status.json
 fnsr.svg_status.json
+fnsr.operator_decisions.md
+daemon.stdout.log
+daemon.stderr.log
 raw_output.txt
 
 # Per-user Claude Code preferences (allowlist; not portable)
