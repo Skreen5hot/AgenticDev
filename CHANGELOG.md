@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.5.3 — ratification-denied classification state (closes the misleading-"working" gap)
+
+**New classification state.** Aaron 2026-06-02 caught the gap during Phase 3 Chain 4 sub-task B: architect 813 ratified `ruling: denied`; applier 814 was correctly NOT dispatched (Event 11 gating per CLAUDE.md §7.8); but `fnsr.status.md` reported `working` with `1 dispatchable` because `_dispatchable_counts()` only checked deps=done, NOT the architect-ruling gate. Substrate was doing the right thing; classifier was lying about it.
+
+### Added — seventh classification state: `ratification-denied`
+
+Inserted as precedence-rank 2 (between `decision-necessary` and `working`):
+
+| State | Trigger |
+|---|---|
+| `decision-necessary` | (unchanged) |
+| **`ratification-denied`** | ≥1 applier task with `status=ready` + all deps `done` + upstream architect (mode=`ratification`) has `outputs.ruling != "ratified"` |
+| `working` | (unchanged; now correctly excludes Event-11-blocked appliers from dispatchable count) |
+| `ready-for-review` | (unchanged) |
+| `ready-for-release` | (unchanged) |
+| `chain-complete` | (unchanged) |
+| `idle` | (unchanged) |
+
+`_dispatchable_counts()` was patched to mirror `fnsr_daemon._architect_ratification_block` — appliers blocked by non-ratified architect upstream no longer count toward `dispatchable_n`.
+
+### Render shape
+
+The `ratification-denied` message surfaces:
+- Each blocked applier @id + the denying architect @id
+- The architect's ruling (`denied` / `deferred`) + `editorial_verdict`
+- First 600 chars of `outputs.rationale` (truncated; full text in state.jsonld)
+- Three remediation paths (reset prior dev / queue v2 triple + abandon / override) per Spec 03 + CLAUDE.md §7.8
+
+### Mirroring `fnsr_daemon._architect_ratification_block`
+
+The classifier's `_applier_event11_blocked()` and `_find_ratification_denied_appliers()` walk the SAME predicate the daemon uses. Adding this helper module-local (rather than importing from daemon) keeps the classifier self-contained for the test surface.
+
+### Tests — 4 new (`tests/test_status.py`)
+
+- `test_ratification_denied_applier_classifies_correctly` — canonical trigger
+- `test_ratification_ratified_applier_is_working_not_denied` — sanity; ratified upstream → working
+- `test_ratification_denied_wins_over_chain_complete` — precedence
+- `test_render_ratification_denied_surfaces_rationale` — render shape
+
+Full suite: **617 tests** (was 613). All pass in both GraphWrite and AgenticDev.
+
+### Banking
+
+`bank-Chain-4-stall-surface-gap` (methodology-refinement-candidate): classifier predicates must mirror daemon dispatch predicates. Every "the daemon refuses to dispatch X" branch needs a matching "classifier reports the refusal cause" branch. v3.4.0 had this for awaiting-decisions; v3.5.0+ for demo-doc state; v3.5.2 for chain-complete; v3.5.3 for ratification-denial. Next: chain-validator-vetoed proposals? CPS-vetoed structured-error tasks? Both are forward-track candidates.
+
+---
+
 ## v3.5.2 — chain-complete classification state (closes the "no clean what's next message" gap)
 
 **New classification state.** Aaron 2026-06-02 caught the gap: after Phase 3 Chain 3 sub-task A landed cleanly (all 4 tasks `done`; 781-test `all_pass exit_code=0`), `fnsr.status.md` showed the generic `Idle` catch-all message instead of an actionable "Chain landed; here's the next command" message. The v3.4.0 classifier had no state for *"chain landed cleanly; phase still in implementing; what's next is operator-emit"* — that case fell through to `idle`.
