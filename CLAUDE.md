@@ -382,6 +382,59 @@ When classification is `ready-for-review`, the renderer scans `demo/PHASE-N-*.md
 
 The `phase_state_changed` audit event payload carries `deploy_url`, `build_ref`, and `notes`. The status renderer reads these directly from the latest PLO event per phase. Operators emitting `state_admin phase demo-released <phase-id> --deploy-url <url> --build-ref <sha>` populate the ready-for-review message verbatim.
 
+## 7.15 Demo-Doc Auto-Generation (v3.5.0)
+
+Per Aaron 2026-06-02: v3.4.0 ships the *channel* that says "demo is ready and validate at {demoLink}" — but the substrate doesn't actually PRODUCE the demo doc. Operator (or orchestrator-Agent) hand-authoring leaves a gap: demo emission requires a manual artifact step. v3.5.0 closes the gap. When `state_admin phase demo-released <phase-id>` is emitted and no `demo/PHASE-N-*.md` exists for the phase, the substrate auto-queues a **4-task demo-doc generation chain** that lands the doc through the normal Pass 2a / Pass 2b discipline.
+
+### The 4-task auto-queued chain
+
+```
+reconnaissance       (walk the phase task chain; identify deliverables,
+                      acceptance criteria passing, NOT-in-scope, citations)
+    ↓
+demo-doc-author      (NEW Opus-tier worker agent; consumer-audience
+                      output; produces a single changes[] entry creating
+                      demo/PHASE-N-{descriptor}.md)
+    ↓
+architect            (Pass 2a ratification; ruling="ratified" required
+                      for applier dispatch via Event 11 gating)
+    ↓
+applier              (Pass 2b commit-finalize; lands the demo doc)
+```
+
+ASCII-only by agent contract; skips `mojibake-repair` (gap-7/8 territory). The recon is REQUIRED per Spec 03.
+
+### New worker agent: `demo-doc-author`
+
+- **Tier:** Opus (consumer-audience artifact)
+- **Audience:** `surface_audience: "consumer"` per §7.13
+- **Required outputs:** `[changes, summary, self_assessment, surface_audience]`
+- **Contract:** one file change per dispatch; ASCII-only; cite only documented refs; stakeholder-review Markdown structure (H1 title, what-delivered, acceptance criteria table, how-to-verify, what-works, NOT-in-scope, sign-off prompt)
+
+### Operator CLI flags
+
+```bash
+# Default behavior: auto-queue chain if no demo doc exists
+python state_admin.py phase demo-released phase-N \
+    --anchor-task <task-id> --build-ref <sha> --deploy-url <url>
+
+# Opt out: operator will hand-author
+python state_admin.py phase demo-released phase-N ... --no-auto-demo-doc
+
+# Force regeneration even if demo/PHASE-N-*.md exists
+python state_admin.py phase demo-released phase-N ... --regenerate-demo-doc
+
+# Custom descriptor in the filename
+python state_admin.py phase demo-released phase-N ... \
+    --demo-doc-descriptor chain-2-cli-integration
+```
+
+The default filename is `demo/PHASE-{N}-{descriptor}.md` where `{descriptor}` is `--demo-doc-descriptor` or `auto-demo` if unspecified.
+
+### Composes with v3.4.0 status surface
+
+Once `phase demo-released` emits and the auto-queued chain enters the dispatch loop, `fnsr.status.md` classifies as `working`. When the applier lands the demo doc, the next watchdog probe re-classifies as `ready-for-review` AND the demo-doc convention scan finds the new file and links it in the operator message verbatim. End-to-end: one operator command → daemon dispatches the chain → applier lands the doc → status file populates the demo link → operator reviews. No hand-authoring required.
+
 ## 8. The Kickoff Ritual
 
 A fresh instance of the template ships with `state.jsonld` pre-loaded with the standard **kickoff ritual** — a 12-task chain that turns a SPEC into a reviewed, revised, and detail-planned project roadmap. This is what runs when the operator clones the template, drops a SPEC.md into `./project/`, and runs the daemon.

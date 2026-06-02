@@ -4,6 +4,65 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.5.0 — demo-doc auto-generation primitive (closes the v3.4.0 channel-without-content gap)
+
+**New substrate primitive.** Per Aaron 2026-06-02 follow-up: v3.4.0 ships the *channel* that says "demo is ready and validate at {demoLink}" — but the substrate doesn't actually PRODUCE the demo doc. Hand-authoring leaves a manual artifact step in what should be an end-to-end agentic flow. The Chain 1 demo doc was authored by the orchestrator-Agent BY HAND; Aaron flagged the gap immediately.
+
+v3.5.0 closes it. When `state_admin phase demo-released <phase-id>` is emitted and no `demo/PHASE-N-*.md` exists for the phase, the substrate auto-queues a 4-task demo-doc generation chain that lands the doc through the normal Pass 2a / Pass 2b discipline.
+
+### Added — `.claude/agents/demo-doc-author.md`
+
+New Opus-tier worker agent. First substrate-shipped agent that produces a **consumer-audience artifact** (per the v3.1.0 surface-audience primitive). Prior worker agents emit `internal` audience outputs that the substrate's audit chain consumes; demo-doc-author breaks that pattern deliberately because the demo doc has a *non-substrate* reader (the PO).
+
+- **Tools:** Read, Grep, Glob (no Edit / Write; file mutations route through applier)
+- **Required outputs:** `[changes, summary, self_assessment, surface_audience]`
+- **`produces_consumer: true`** declaration in frontmatter
+- **Output contract:** one file change per dispatch; ASCII-only (skips mojibake-repair); stakeholder-review Markdown structure (H1 title, what-delivered, acceptance criteria table mapping each AC to its proof, how-to-verify, what-works, NOT-in-scope, sign-off prompt with pass/revise/pivot decision)
+
+### Added — auto-queue logic in `cmd_phase_demo_released`
+
+The 4-task chain composed when `phase demo-released` emits:
+
+```
+reconnaissance  →  demo-doc-author  →  architect (ratification)  →  applier
+```
+
+Recon walks the phase's task chain and identifies deliverables, passing acceptance criteria, NOT-in-scope items, and SPEC / ADR citations. Demo-doc-author reads recon findings from UPSTREAM and produces a single `changes[]` entry creating `demo/PHASE-N-{descriptor}.md`. Architect ratifies as Pass 2a (canonical-doc-shape demo doc is substantive). Applier commits.
+
+### Added — three CLI flags on `state_admin phase demo-released`
+
+| Flag | Behavior |
+|---|---|
+| `--no-auto-demo-doc` | Skip auto-generation; operator will hand-author |
+| `--regenerate-demo-doc` | Force generation even if `demo/PHASE-N-*.md` already exists |
+| `--demo-doc-descriptor <str>` | Inserted into filename (default: `auto-demo`) |
+
+### Composes with v3.4.0 status surface
+
+Once the chain enters the dispatch loop, `fnsr.status.md` classifies as `working`. When applier lands the doc, the next watchdog probe re-classifies as `ready-for-review` AND the demo-doc convention scan (§7.14) finds the new file and links it in the operator message verbatim. End-to-end: ONE operator command → daemon dispatches the chain → applier lands the doc → status file links it → operator reviews. No hand-authoring required.
+
+### Added — 7 regression tests (`TestDemoDocAutoQueue`)
+
+- `test_existing_demo_doc_returns_path` — convention scan finds existing doc
+- `test_no_demo_doc_returns_none` — empty demo/ → None
+- `test_compose_chain_produces_4_tasks` — chain shape verified (agents, deps, modes, target filename)
+- `test_demo_released_auto_queues_when_no_doc_exists` — happy path
+- `test_no_auto_demo_doc_flag_skips_queue` — opt-out
+- `test_existing_demo_doc_skips_auto_queue` — respect existing hand-authored doc
+- `test_regenerate_flag_queues_even_when_doc_exists` — force regeneration
+
+Full suite: **603 tests** (was 596). All pass in both GraphWrite and AgenticDev.
+
+### Template-sync manifest extended
+
+`.claude/agents/demo-doc-author.md` added to `_DEFAULT_TEMPLATE_SYNC_MANIFEST`.
+
+### CLAUDE.md §7.15 documents the primitive
+
+New section walks through the 4-task chain, agent contract, CLI flags, and composition with the v3.4.0 status surface.
+
+---
+
 ## v3.4.0 — system status communication surface (closes 2026-06-02 stop-without-comms gap)
 
 **New substrate primitive.** Per Aaron 2026-06-02: anytime the system stops, the operator needs a SINGLE communication file that classifies current state and tells them what to do. The substrate had detection (watchdog), recovery (Fixer), and a decision-detail surface (`fnsr.operator_decisions.md`) — but no unified status entry-point. Aaron's direct spec:
