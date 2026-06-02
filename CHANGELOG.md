@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.5.1 — demo-doc convention scan fix (closes v3.5.0 first-exercise bug)
+
+**Substrate-discipline patch.** First real-world exercise of v3.5.0 against Phase 3 Chain 2 (2026-06-02) surfaced two compounding bugs in `_find_demo_doc()`:
+
+1. **Filter too loose:** `if f"PHASE-{tail}" in p.name.upper()` matches `WALKTHROUGH-PHASE-3.md` (substring), `FEEDBACK-PHASE-3.md`, and any other file with `PHASE-N` anywhere in the name. The substrate's demo-doc convention is filenames STARTING with `PHASE-N-` (matches what the v3.5.0 auto-gen chain produces).
+2. **Selection by filename sort is fragile:** when filenames mix case (`CHAIN-1-TURTLE-IMPORT.md` vs `chain-2-cli-integration.md`), ASCII byte ordering picks the wrong file as "most recent." `WALKTHROUGH-PHASE-3.md` sorted LAST so it won under `candidates[-1]`.
+
+The compound bug: Chain 2 successfully landed `demo/PHASE-3-chain-2-cli-integration.md` via the auto-gen chain, but `fnsr.status.md` linked `demo/WALKTHROUGH-PHASE-3.md` (a stale Phase 2-era walkthrough doc) instead, defeating the whole point of the auto-gen primitive.
+
+### Fixed — `_find_demo_doc()` in `fnsr_status.py`
+
+- **Filter:** `p.name.upper().startswith(f"PHASE-{tail}-")` — excludes `WALKTHROUGH-PHASE-N.md`, `FEEDBACK-PHASE-N.md`, and PHASE-N-prefix collisions like `PHASE-30-*` when querying `phase-3`. The trailing dash is load-bearing.
+- **Selection:** `candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)` — picks by most-recently-modified-on-disk. Robust against filename case variation; matches "what the operator most recently produced" semantics.
+
+### Added — 5 regression tests (`TestFindDemoDoc` in `tests/test_status.py`)
+
+- `test_walkthrough_phase_n_does_NOT_match` — the original bug; substring incidentally matched `WALKTHROUGH-PHASE-3.md`
+- `test_multiple_phase_n_picks_most_recent_mtime` — among matching files, mtime wins
+- `test_phase_n_dash_prevents_collision_with_phase_n_plus_digits` — querying `phase-3` doesn't pick up `PHASE-30-*.md` (trailing-dash invariant)
+- `test_case_insensitive_prefix_match` — operator may write filename in any case
+- `test_no_demo_dir_returns_none` — graceful handling when `demo/` is absent
+
+Full suite: **608 tests** (was 603). All pass in both GraphWrite and AgenticDev.
+
+### Validated end-to-end against the live state
+
+After the fix, re-ran `state_admin status-message` on real state.jsonld (phase-3 in `demo-released`; Chain 1 + Chain 2 demo docs both present alongside `WALKTHROUGH-PHASE-3.md`). Status file now correctly links `demo/PHASE-3-chain-2-cli-integration.md` (the v3.5.0 auto-generated doc Chain 2 produced), not the incidental walkthrough match.
+
+### Banking
+
+The compound-bug class — "convention-scan loose match + sort-order selection fragility" — is the kind of substrate-discipline observation worth banking. The fix is small; the lesson is "prefer startswith over substring for filename convention scans; prefer mtime over sort for 'most recent' selection."
+
+---
+
 ## v3.5.0 — demo-doc auto-generation primitive (closes the v3.4.0 channel-without-content gap)
 
 **New substrate primitive.** Per Aaron 2026-06-02 follow-up: v3.4.0 ships the *channel* that says "demo is ready and validate at {demoLink}" — but the substrate doesn't actually PRODUCE the demo doc. Hand-authoring leaves a manual artifact step in what should be an end-to-end agentic flow. The Chain 1 demo doc was authored by the orchestrator-Agent BY HAND; Aaron flagged the gap immediately.
