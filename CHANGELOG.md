@@ -4,6 +4,59 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.5.2 — chain-complete classification state (closes the "no clean what's next message" gap)
+
+**New classification state.** Aaron 2026-06-02 caught the gap: after Phase 3 Chain 3 sub-task A landed cleanly (all 4 tasks `done`; 781-test `all_pass exit_code=0`), `fnsr.status.md` showed the generic `Idle` catch-all message instead of an actionable "Chain landed; here's the next command" message. The v3.4.0 classifier had no state for *"chain landed cleanly; phase still in implementing; what's next is operator-emit"* — that case fell through to `idle`.
+
+### Added — sixth classification state: `chain-complete`
+
+Inserted between `ready-for-release` and `idle` in the precedence ordering:
+
+| State | Trigger | Operator message |
+|---|---|---|
+| `decision-necessary` | (unchanged) | (unchanged) |
+| `working` | (unchanged) | (unchanged) |
+| `ready-for-review` | (unchanged; PLO=`demo-released`) | (unchanged) |
+| `ready-for-release` | (unchanged; PLO=`po-satisfied`/`drift-reconciled`) | (unchanged) |
+| **`chain-complete`** | Phase in `implementing` or `planned` + no work in flight + done task with history ts NEWER than the phase's latest `phase_state_changed` event | *"Chain just completed on phase-N. Suggested next actions: commit disk state, then emit `phase demo-released phase-N --anchor-task <X>` to trigger v3.5.0 demo-doc auto-generation."* |
+| `idle` | none of the above | (unchanged) |
+
+Trigger logic uses relative timestamp ordering (not a time window): if any task with `status=done` has a history timestamp newer than the phase's most recent PLO transition, a chain landed AFTER the last operator transition for that phase — meaning the operator hasn't yet emitted the next state. The substrate surfaces this with an actionable message.
+
+### Render shape
+
+The chain-complete message is the most operationally specific of the five action-required states. It includes:
+
+1. The phase id (`phase-N`)
+2. The most-recently-completed task @id (substituted into `--anchor-task` verbatim)
+3. The exact `git status / git add / git commit` skeleton
+4. The exact `state_admin phase demo-released` invocation with `--anchor-task` populated, `--build-ref <commit-sha>` placeholder, and `--regenerate-demo-doc --demo-doc-descriptor <short-name>` flags
+5. Forward-pointer to what happens next ("After step 2, the substrate auto-queues the 4-task demo-doc chain... reclassifies to ready-for-review with the demo doc linked")
+6. Escape hatches for the "chain is NOT yet ready for review" case (`append-tasks` for next chain; `reset` for retry)
+
+### Tests — 5 new (in `tests/test_status.py`)
+
+- `test_chain_complete_fires_when_done_task_newer_than_plo_ts` — the canonical happy-path trigger
+- `test_chain_complete_does_NOT_fire_when_no_done_task_after_plo_ts` — phase just transitioned to implementing; nothing has landed yet → idle, not chain-complete
+- `test_chain_complete_loses_to_working` — precedence: `in_progress > 0` keeps the substrate in `working`
+- `test_chain_complete_loses_to_ready_for_review` — precedence: PLO=`demo-released` wins over chain-complete signals
+- `test_render_chain_complete_substitutes_task_id` — render contains the exact next-command with `--anchor-task` populated
+
+Full suite: **613 tests** (was 608). All pass in both GraphWrite and AgenticDev.
+
+### Verified end-to-end on real state
+
+After the fix, ran `state_admin status-message` against `state.jsonld` (Phase 3 in `implementing`; 778-781 sub-task A landed; no pending decisions). Output:
+
+```
+system status: chain-complete
+  written to: fnsr.status.md
+```
+
+`fnsr.status.md` now shows the actionable two-step next-action message with `--anchor-task urn:fnsr:task:781-test-p3-c3` populated and the path forward fully spelled out.
+
+---
+
 ## v3.5.1 — demo-doc convention scan fix (closes v3.5.0 first-exercise bug)
 
 **Substrate-discipline patch.** First real-world exercise of v3.5.0 against Phase 3 Chain 2 (2026-06-02) surfaced two compounding bugs in `_find_demo_doc()`:
