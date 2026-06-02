@@ -4,6 +4,79 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.4.0 — system status communication surface (closes 2026-06-02 stop-without-comms gap)
+
+**New substrate primitive.** Per Aaron 2026-06-02: anytime the system stops, the operator needs a SINGLE communication file that classifies current state and tells them what to do. The substrate had detection (watchdog), recovery (Fixer), and a decision-detail surface (`fnsr.operator_decisions.md`) — but no unified status entry-point. Aaron's direct spec:
+
+> Decision Necessary: {decision message}
+> Ready for PO Review / UAT: Test at {url} and validate with {demoLink}. Awaiting your review.
+> Done / Ready for Release: Ready for production deployment. Awaiting your release.
+
+### Added — `fnsr_status.py` classifier + renderer module
+
+Pure-Python read-only module. Walks state.jsonld + the `phase_state_changed` audit events. Classifies current substrate state into one of five closed-enum states:
+
+| State | Trigger | Operator message |
+|---|---|---|
+| `decision-necessary` | ≥1 task in `awaiting_operator_decision` | *N decision(s) pending; see operator_decisions.md* |
+| `working` | `in_progress > 0` OR ≥1 dispatchable ready (all deps done) | *Substrate is actively dispatching* |
+| `ready-for-review` | latest PLO state ∈ {`demo-released`} AND queue idle | *Test at {deploy-url}; validate at {demo-doc}. Awaiting your review.* |
+| `ready-for-release` | latest PLO state ∈ {`po-satisfied`, `drift-reconciled`} | *Ready for production deployment. Awaiting your release.* |
+| `idle` | none of the above | *Substrate idle; consider emitting phase demo-released...* |
+
+Precedence is top-down: `decision-necessary` wins over `demo-released`; `working` wins over `ready-for-review` (active dispatch beats waiting for review). Classification is a pure function of state.
+
+### Added — `state_admin status-message [--print]`
+
+On-demand CLI to render `fnsr.status.md`. The file lives next to `state.jsonld` (matches the operator_decisions.md discoverability convention).
+
+```bash
+python state_admin.py status-message
+# system status: ready-for-review
+#   written to: ./fnsr.status.md
+```
+
+`--print` also dumps the Markdown to stdout for grep-piping.
+
+### Added — watchdog auto-emission + recommendation surfacing
+
+`fnsr_stall_watch.py` now calls `fnsr_status.emit()` on every probe alongside the operator_decisions emit. The watchdog `recommendation` field prepends `SYSTEM_STATUS=<classification>` for action-required states (decision-necessary / ready-for-review / ready-for-release). CLI tail prints `system_status=<classification> (see fnsr.status.md)`.
+
+### Demo-doc convention
+
+When classification is `ready-for-review`, the renderer scans `demo/PHASE-N-*.md` for the demo doc matching the phase id. If found, the doc path is linked in the operator message. Subject projects ship per-phase demo docs at `demo/PHASE-N-{short-name}.md` to populate the message verbatim.
+
+### PLO-event integration
+
+The renderer reads `deploy_url`, `build_ref`, and `notes` directly from the latest `phase_state_changed` event per phase. Operators emitting `state_admin phase demo-released <phase-id> --deploy-url <url> --build-ref <sha> --notes "..."` populate the ready-for-review message end-to-end.
+
+### Resolves ft-767 (partial)
+
+The v3.1.0-era forward-track `ft-767-recovery-dispatch-755-apply-p3-c1c-1` (subject: `capability:phase-readiness-auto-detect-v3.4`) scoped four missing pieces. v3.4.0 ships two: the **readiness probe predicate** (PLO event walker) and the **recommendation channel** (status file). Forward-track transitioned A → C, resolution=`ratified-into-spec`. The remaining two pieces — **phase-membership signal on tasks** and **machine-readable phase acceptance criteria** — remain forward-tracked because they require ≥2 phase cycles of friction observation before a stable shape emerges.
+
+### Added — 18 regression tests (`tests/test_status.py`)
+
+- `TestClassifier` (9 tests): empty-state-is-idle, awaiting-decision-precedence, in-progress-is-working, dispatchable-is-working, blocked-deps-is-not-working, demo-released-is-ready-for-review, latest-phase-state-wins, po-satisfied-is-ready-for-release, drift-reconciled-is-ready-for-release
+- `TestRender` (5 tests): per-state Markdown shape including URL / demo-doc / notes propagation
+- `TestEmit` (3 tests): writes file, handles unreadable state, demo-doc discovery
+- `TestStateAdminStatusMessage` (1 test): end-to-end CLI invocation
+
+Full suite: **596 tests** (was 578). All pass in both GraphWrite and AgenticDev.
+
+### Supersedes operator_decisions.md as primary entry-point
+
+`fnsr.operator_decisions.md` is no longer the primary operator-facing surface; it's the **decision-detail file** referenced from `fnsr.status.md` when classification is `decision-necessary`. The status file is the entry; the decisions file is the drill-down. Both auto-refresh on every watchdog probe.
+
+### Template-sync manifest extended
+
+`fnsr_status.py` + `tests/test_status.py` added to `_DEFAULT_TEMPLATE_SYNC_MANIFEST`.
+
+### CLAUDE.md §7.14 documents the surface
+
+New section in CLAUDE.md walks through states, precedence, emission channels, demo-doc convention, and PLO integration.
+
+---
+
 ## v3.3.2 — resolve→execution link discipline (closes 752-recon-p3-c1c wedge)
 
 **Substrate-discipline patch.** Validating v3.3.1 against a live daemon (2026-06-01), the diagnostic surfaced a deeper gap: `state_admin resolve` closed the `awaiting_operator_decision` surface but did NOT execute the chosen option's recommendation. The operator resolved two dispatcher tasks (758/760 on anchor 752-recon-p3-c1c) via `--option 1`; both resolves committed cleanly; but Option 1's text ("wrap F1 in envelope on 752; mark 752 done") never ran, so 752 stayed `status=blocked` and Chain 1c stayed wedged behind it. No audit linkage between the decision and its execution.

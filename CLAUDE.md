@@ -352,6 +352,36 @@ commit-finalize              (Pass 2b; applier; verification-ritual gating
 
 The audit chain's append-only invariant means v2.7.0 operator-applier chains remain valid in v2.8.0 state files. New chains use the v2.8.0 commit-finalize shape; old chains continue to verify under `state_admin.py verify`.
 
+## 7.14 System Status Communication Surface (v3.4.0)
+
+Per Aaron 2026-06-02: anytime the substrate stops, the operator needs a **single communication file** that classifies current state and tells them what to do. `fnsr.status.md` is that file. It supersedes `fnsr.operator_decisions.md` as the primary entry-point surface; operator_decisions.md remains as the decision-detail file referenced from the status file when classification is `decision-necessary`.
+
+### The five communication states
+
+| State | Trigger | Operator message |
+|---|---|---|
+| **decision-necessary** | ≥1 task in `status=awaiting_operator_decision` | *"N operator decision(s) pending. See fnsr.operator_decisions.md..."* |
+| **working** | `in_progress > 0` OR ≥1 dispatchable ready task (all deps done) | *"Substrate is actively dispatching: N in-progress, M dispatchable..."* |
+| **ready-for-review** | latest PLO state of any phase ∈ {`demo-released`} AND no decisions pending AND queue idle | *"Test at {deploy-url} and validate at [demo-doc]. Awaiting your review."* |
+| **ready-for-release** | latest PLO state of any phase ∈ {`po-satisfied`, `drift-reconciled`} AND queue idle | *"Ready for production deployment. Awaiting your release."* |
+| **idle** | none of the above | *"Substrate idle; consider emitting phase demo-released if the just-completed chain is ready for review."* |
+
+Precedence is top-down: `decision-necessary` always wins over a `demo-released` phase; `working` wins over `ready-for-review` (active dispatch beats waiting for review). Classification is a pure function of state.jsonld + PLO `phase_state_changed` events (latest-timestamp-wins per phase).
+
+### Emission channels
+
+1. **On-demand CLI:** `python state_admin.py status-message [--print]`
+2. **Auto-refresh:** `fnsr_stall_watch.py` calls `fnsr_status.emit()` on every probe; the watchdog's `recommendation` field prepends `SYSTEM_STATUS=<classification>` for action-required states; CLI tail prints `system_status=<classification>`.
+3. **The file itself:** `fnsr.status.md` lives next to `state.jsonld`; any operator opening the repo sees it.
+
+### Demo-doc convention
+
+When classification is `ready-for-review`, the renderer scans `demo/PHASE-N-*.md` for the demo doc matching the phase id. If found, the doc path is linked in the operator message. Per-phase demo docs live at `demo/PHASE-N-{short-name}.md`.
+
+### PLO-event integration
+
+The `phase_state_changed` audit event payload carries `deploy_url`, `build_ref`, and `notes`. The status renderer reads these directly from the latest PLO event per phase. Operators emitting `state_admin phase demo-released <phase-id> --deploy-url <url> --build-ref <sha>` populate the ready-for-review message verbatim.
+
 ## 8. The Kickoff Ritual
 
 A fresh instance of the template ships with `state.jsonld` pre-loaded with the standard **kickoff ritual** — a 12-task chain that turns a SPEC into a reviewed, revised, and detail-planned project roadmap. This is what runs when the operator clones the template, drops a SPEC.md into `./project/`, and runs the daemon.
