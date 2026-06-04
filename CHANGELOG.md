@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.6.0 — phantom-stall-after-recovery auto-supersession (closes the 3x-this-session pattern)
+
+**New substrate primitive.** Aaron 2026-06-04: "the service is recommending #1 but I want sustained fixed #4." Pattern hit 3 times in the 2026-06-02 → 2026-06-04 session:
+
+- Phase 3 Chain 1c → 755-applier `apply_partial_failure`; Fixer recovery chain 763-765 landed; manual Option A state-surgery to unwedge downstream
+- Chain 4.1 → 835-applier same pattern; manual Option A again
+- Chain 5 sub-task A → 851-applier same pattern; manual Option A would have been the third
+
+Each time the substantive recovery succeeded (test-runner `all_pass`), but the blocked anchor's `status` field stayed `blocked` and downstream tasks remained dep-wedged. The Fixer correctly diagnosed it as a phantom stall but couldn't fix it — only the operator could mutate task status. **Three manual Option-As in three days is a substrate-discipline signal.**
+
+### Added — recovery-dispatcher anchor tagging (v3.6.0a)
+
+`fnsr_daemon._recovery_dispatcher` now injects `inputs.recovery_anchor: <original-anchor-task-id>` into every recovery-chain task it appends. Backward-compatible: existing chains without the tag stay unaffected; the supersession hook below is a no-op when the tag is absent.
+
+### Added — daemon commit-loop supersession hook (v3.6.0b)
+
+New helper `_maybe_supersede_recovery_anchor(state, completed_task)`. Called from the daemon's success-commit branch after every task transitions to `status=done`. Fires iff:
+
+- `completed_task.agent == "test-runner"`
+- `completed_task.outputs.status == "all_pass"`
+- `completed_task.inputs.recovery_anchor` is set
+- The referenced anchor exists in state.tasks
+- The anchor's current status is `blocked` (idempotent: skip if already done / abandoned)
+
+On fire: flips the anchor to `status=done` with an `outputs.anchor_superseded_by` annotation (citing `test_runner_task`, `applier_task` via sibling-recovery_anchor lookup, `test_result`, `reason`) and records a chain-hashed `anchor_superseded_by_recovery` audit event.
+
+### Stall-detector auto-skips (v3.6.0c — subsumed)
+
+`_stalls_eligible_for_fixer()` already filters by `status in ("blocked", "failed")`. Since the supersession hook flips the anchor to `done`, the stall-detector automatically stops considering it as a candidate. **No separate patch needed** — the commit-hook does the work in one place; the stall-detector's existing filter handles the rest. Cleaner than a separate walk-forward predicate.
+
+### Added — 5 regression tests (`TestRecoveryAnchorAutoSupersession`)
+
+- `test_recovery_dispatcher_tags_appended_tasks_with_recovery_anchor` — v3.6.0a: the inputs.recovery_anchor field is injected
+- `test_maybe_supersede_flips_blocked_anchor_to_done` — v3.6.0b: happy path with provenance and audit event
+- `test_maybe_supersede_is_idempotent_on_already_done_anchor` — idempotency
+- `test_maybe_supersede_only_fires_on_test_runner_all_pass` — three negative guards (wrong agent / non-all_pass / no recovery_anchor)
+- `test_supersession_unwedges_stall_detector` — integration: post-supersession, the stall-detector no longer treats the anchor as candidate
+
+Full suite: **622 tests** (was 617). All pass in both GraphWrite and AgenticDev.
+
+### What this closes
+
+| Pattern instance | Pre-v3.6.0 | Post-v3.6.0 |
+|---|---|---|
+| recovery-chain test-runner `all_pass` on blocked anchor | Fixer re-fires → operator decision surface → manual Option A state-surgery | Anchor auto-flips to `done` with provenance + audit event; downstream deps satisfied automatically |
+| Stall-detector loop on phantom-stalled anchor | Repeated Fixer dispatches (Opus tier) until operator intervenes | Anchor flipped to `done`; stall-detector skips on next probe |
+| Operator-decision surface for already-recovered anchors | Fixer 842 / 864 surfaced these as Path 1 judgment refusals | No surface — supersession runs autonomously |
+
+### Concurrent with the immediate Chain 5-A unwedge
+
+This v3.6.0 ship runs alongside the immediate Option 1 state-surgery on 851-apply-p3-c5-A (manual unwedge for the in-flight Chain 5 work; the substrate patch is forward-looking and can't retroactively flip status). Per Aaron 2026-06-04 plan: ship both — Option 1 unwedges this instance + Option 4 substrate patch prevents recurrence.
+
+### Banking
+
+`bank-826-rat-p3-c4-B-v2-1` (recorded 2026-06-02) — "classifier predicates must mirror daemon dispatch predicates" — has a sibling pattern here: **substrate auto-recovery hooks must reach all the way to anchor-state finalization, not just chain-dispatch and test-execution.** The recovery-dispatcher knew how to start the chain; the missing piece was the chain's success signal reaching back to update the anchor's status. Hook lives in the daemon's success-commit branch where the test-runner completion is observed.
+
+---
+
 ## v3.5.3 — ratification-denied classification state (closes the misleading-"working" gap)
 
 **New classification state.** Aaron 2026-06-02 caught the gap during Phase 3 Chain 4 sub-task B: architect 813 ratified `ruling: denied`; applier 814 was correctly NOT dispatched (Event 11 gating per CLAUDE.md §7.8); but `fnsr.status.md` reported `working` with `1 dispatchable` because `_dispatchable_counts()` only checked deps=done, NOT the architect-ruling gate. Substrate was doing the right thing; classifier was lying about it.
