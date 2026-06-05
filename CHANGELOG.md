@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.2 — marep-orchestrator summary length budget 1500 -> 2500
+
+**Frontmatter-only calibration.** Third surgical fix from the Phase 3 exit retro 03-analysis dispatch cycle (977-marep-orch-conflict-detection).
+
+### Calibration
+
+`.claude/agents/marep-orchestrator.md` length_budgets.summary: 1500 -> 2500.
+
+### Trigger
+
+Per Aaron 2026-06-05: "Close the Gap" — substrate-fix path over state-surgery-accept (the bank-and-defer path).
+
+After v3.7.1 cleared the persona-theater veto on `conflicts_surfaced[*].positions[*].source_agent` (via _DESIGNATED_REFERENCE_FIELDS allowlist), the next dispatch tripped `freeform_brainstorm_drift` on the top-level `summary` field at 1593 chars vs 1500 budget (6.2% overrun).
+
+Field-by-field analysis confirmed the per-conflict structures fit prior budgets cleanly: subject 161-220 (limit 250), synthesis_attempt 535-920 (limit 1000), resolution rationale 455-627 (limit 800). Only the top-level `summary` overran. Conflict-detection mode with 4 cross-role conflicts legitimately needs more `summary` headroom than phase-transition mode.
+
+Evidence basis: `bank-977-marep-orch-conflict-detection-03-analysis-1`.
+
+### No code change
+
+The substrate's `_agent_anti_pattern_config` re-reads agent frontmatter on every dispatch — no daemon restart required. Test count unchanged at 628.
+
 ## v3.7.1 — source_agent + voter allowlisted in _DESIGNATED_REFERENCE_FIELDS
 
 **Surgical complement to v3.7.0.** The 977-marep-orch-conflict-detection-03-analysis dispatch (Phase 3 exit retro, 03-analysis closure chain) produced a schema-correct conflict-detection output but was CPS-vetoed under `persona_theater_detected` on `conflicts_surfaced[*].positions[*].source_agent` fields containing `@QA`, `@DeliveryManager`, etc.
