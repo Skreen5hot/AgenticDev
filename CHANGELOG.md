@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.6 — marep-orchestrator synthesis_attempt budget 1000 -> 1500
+
+**Frontmatter-only calibration.** Conflict-detection mode produced consecutive payloads (10:15:44Z and 13:03:24Z dispatches on 977) where one or more `conflicts_surfaced[*].synthesis_attempt` fields overran the 1000-char budget by 20-25%. Structural reality: 4 cross-role conflicts with substantive analytical positions legitimately exceed 1000 chars when the synthesis describes WHERE positions agree and WHERE they diverge.
+
+### Calibration
+
+`.claude/agents/marep-orchestrator.md` length_budgets.`conflicts_surfaced[*]/synthesis_attempt`: 1000 -> 1500.
+
+Companion to v3.7.2 (summary 1500 -> 2500) — same shape, different field.
+
+### Trigger
+
+Per Aaron 2026-06-05 "close the gap, the goal is to find the gaps and close them, as we build." Substrate-fix path over state-surgery-accept (auto-mode classifier correctly refused state-surgery as an audit-integrity bypass).
+
+Evidence: bank-977-... cluster (synthesis_attempt overruns on consecutive dispatches).
+
+### No code change
+
+Frontmatter only; `_agent_anti_pattern_config` re-reads on every dispatch.
+
 ## v3.7.5 — Fixer auto_resolution; dispatcher honors no-execution-required without escalating
 
 **Per Aaron 2026-06-05: "Help me understand why I need to keep making all these decisions? use the current one as an example. I do not see the value I am adding."**
