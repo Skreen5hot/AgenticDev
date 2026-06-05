@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.3 — persona-theater parenthetical-citation exemption
+
+**Third surgical persona-theater exemption** this retro cycle, completing the v3.7 calibration cluster. Per Aaron's "find the gaps and close them, as we build" directive — each escape pattern that surfaces during real dispatches yields a substrate amendment.
+
+### Added — `_in_parenthetical_citation` helper
+
+`_check_no_persona_theater` previously vetoed `@<Role>` mentions used as parenthetical attribution markers (e.g., "the contract gap — advisory (@QA, QA-6) vs major (@DeliveryManager, DM-2) on the same recurring pattern"). These are CITATIONS, not addresses; the role identifier marks WHICH agent surfaced the issue.
+
+New helper `_in_parenthetical_citation(text, pos)` performs a paren-balance walk over a ±50-char window. Returns true iff the position is inside an unclosed `(...)` region (preceding `(` not yet balanced, AND a `)` within reach after). Balances nested parens correctly.
+
+When `_in_parenthetical_citation` returns true, the @-match is exempted from the persona-theater veto.
+
+Evidence basis: `bank-977-marep-orch-conflict-detection-03-analysis-1` (second instance — the 09:55:10Z veto on `conflicts_surfaced[1].subject` after v3.7.2 fixed summary length).
+
+### Pattern: three escape categories in one retro cycle
+
+| Version | Escape pattern | Fix |
+|---|---|---|
+| v3.7.0 | Negation context ("absence of @QA", "@QA was not dispatched") | `_PERSONA_NEGATION_CONTEXT_RE` lookback/ahead |
+| v3.7.1 | Schema agent-reference fields (`source_agent`, `voter`) | `_DESIGNATED_REFERENCE_FIELDS` allowlist |
+| v3.7.3 | Parenthetical attribution citations (`(@QA, QA-6)`) | `_in_parenthetical_citation` paren-balance walk |
+
+The persona-theater predicate is now substantially better calibrated. The remaining false-positive surface is small — only @-mentions in unbracketed free-text without negation context.
+
+### Added — 5 regression tests
+
+- `test_v373_parenthetical_citation_exempts` — the bank-977 case verbatim (multi-citation subject)
+- `test_v373_single_paren_citation_exempts` — `(@QA)` alone
+- `test_v373_paren_with_attribution_word_exempts` — `(per @Architect)` style
+- `test_v373_address_outside_parens_still_vetoes` — over-exemption guard
+- `test_v373_unclosed_paren_does_not_exempt` — unclosed `(@Architect` (no closing paren) still vetoes
+
+### Test count: 633 (up from 628)
+
+### Daemon restart required
+
+Unlike v3.7.2 (frontmatter-only), v3.7.3 adds a new Python function. Daemon must be restarted to pick up the change.
+
 ## v3.7.2 — marep-orchestrator summary length budget 1500 -> 2500
 
 **Frontmatter-only calibration.** Third surgical fix from the Phase 3 exit retro 03-analysis dispatch cycle (977-marep-orch-conflict-detection).
