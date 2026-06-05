@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.1 — source_agent + voter allowlisted in _DESIGNATED_REFERENCE_FIELDS
+
+**Surgical complement to v3.7.0.** The 977-marep-orch-conflict-detection-03-analysis dispatch (Phase 3 exit retro, 03-analysis closure chain) produced a schema-correct conflict-detection output but was CPS-vetoed under `persona_theater_detected` on `conflicts_surfaced[*].positions[*].source_agent` fields containing `@QA`, `@DeliveryManager`, etc.
+
+The substrate's `_DESIGNATED_REFERENCE_FIELDS` allowlist had `confirmed_by, contested_by, owner, supporting_sources, dissenting_sources` — but NOT `source_agent` (the marep-orchestrator conflict-detection schema's agent-reference field) and NOT `voter` (the proposed_votes schema's agent-reference field per surfaces/retro/phases/03-analysis.md). Both schemas explicitly carry @-prefixed Role mentions by contract.
+
+### Added — `source_agent` + `voter` allowlisted
+
+```python
+_DESIGNATED_REFERENCE_FIELDS = (
+    "confirmed_by", "contested_by", "owner",
+    "supporting_sources", "dissenting_sources",
+    "source_agent", "voter",  # v3.7.1
+)
+```
+
+Evidence basis: `bank-977-marep-orch-conflict-detection-03-analysis-1` (977 conflict-detection vetoed despite schema-correct output).
+
+### Added — 2 regression tests
+
+- `test_v371_source_agent_field_allows_addresses` — conflicts_surfaced[*].positions[*].source_agent with `@QA`/`@DeliveryManager` does not veto
+- `test_v371_voter_field_allows_addresses` — proposed_votes[*].voter with `@QA`/`@DeliveryManager` does not veto
+
+### Why this is a separate ship from v3.7.0
+
+v3.7.0 (negation-context exemption + length-budget calibration) was the obvious calibration. v3.7.1 is the second-order discovery: the substrate's designated-reference-field allowlist was incomplete relative to the schemas the substrate ITSELF declared in the marep-orchestrator contract and the 03-analysis vote schema. The 977 dispatch under v3.7.0-relaxed budgets was the trigger that exposed the missing allowlist entries.
+
+### Test count: 628 (up from 626)
+
 ## v3.7.0 — persona-theater negation exemption + retro-analytical length-budget calibration
 
 **Two surgical substrate calibrations** from the Phase 3 exit retro (01-gathering → 02-merge transition).
