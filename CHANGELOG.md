@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.2 — `_recovery_dispatcher` auto_resolution path now includes `validator_report`
+
+**Real substrate bug from v3.7.5.** The auto_resolution return path I added in v3.7.5 omitted the `validator_report` key, but the recovery-dispatcher's `required_outputs` (per agent contract frontmatter) declares `[dispatched, validator_report, escalated, summary]`. CPS-vetoed in the wild on task 1008 in the Phase 3 exit retro after 977 completed cleanly under v3.8.1 and the auto_resolution path actually fired for the first time on a real Fixer output.
+
+### Fix
+
+```python
+return WorkerResult(True, {
+    "dispatched": 0,
+    "escalated": False,
+    "validator_report": None,  # v3.8.2 fix
+    "auto_resolved": True,
+    ...
+})
+```
+
+The v3.7.5 test (`test_v375_auto_resolution_no_execution_required_skips_escalation`) asserted shape but did NOT walk the agent contract's `required_outputs`. It passed on a malformed-by-contract output. This is the v3.7.5 test discipline gap.
+
+### Added — `test_v382_auto_resolution_includes_validator_report`
+
+Explicitly walks the recovery-dispatcher's required_outputs (`dispatched`, `validator_report`, `escalated`, `summary`) and asserts every key is present in the auto_resolution output.
+
+### Test count: 631 (up from 630)
+
+### Substrate-discipline lesson
+
+Per v3.7.5 + v3.8.2: when adding a new return shape to a system agent, the test must validate against the agent's `required_outputs` contract (not just structural shape). The CPS check that would have caught this in production is the contract check; tests should mirror it. Adding a corpus-wide `TestSystemAgentReturnsConformToRequiredOutputs` test is forward-tracked for v3.9.
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.1 — length-budget enforcement REMOVED from `_check_no_freeform_brainstorm`
 
 **Per Aaron 2026-06-05: "Path B — Apply v3.8.0's lesson to budgets too."**
