@@ -4,6 +4,73 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.0 — `_check_no_persona_theater` REMOVED
+
+**Per Aaron 2026-06-05: "lets remove it did not pay off like I hoped."**
+
+After four false-positive ships in the Phase 3 exit retro:
+
+| Version | Escape pattern | Fix shipped |
+|---|---|---|
+| v3.7.0 | Negation context ("absence of @QA") | `_PERSONA_NEGATION_CONTEXT_RE` lookback/ahead |
+| v3.7.1 | Schema agent-reference fields (`source_agent`, `voter`) | `_DESIGNATED_REFERENCE_FIELDS` allowlist |
+| v3.7.3 | Parenthetical attribution (`(@QA, QA-6)`) | `_in_parenthetical_citation` paren-balance walk |
+| (next) | Narrative role description (`@QA voting on DM-2`) | (would have been v3.7.x another exemption) |
+
+The empirical reality: regex over free text cannot distinguish role-as-actor (legitimate attribution / voter casts / citation / narrative description) from role-as-addressee (conversational drift). Every new analytical mode reveals a new false-positive vector.
+
+The original concern (conversational drift) is already prevented by:
+- JSON-envelope-only output parsing (prose outside JSON fails extraction)
+- Agent prompts forbidding prose outside the envelope
+- Length budgets on free-text fields
+- The retro-end synthesist's quality observation pass
+
+The regex was belt-and-suspenders that became the suspenders we kept tripping over.
+
+### Removed
+
+- `_check_no_persona_theater` function
+- `_PERSONA_ADDR_RE` regex
+- `_PERSONA_NEGATION_CONTEXT_RE` regex
+- `_PERSONA_NEGATION_LOOKBACK_CHARS` constant
+- `_PERSONA_PAREN_LOOKBACK_CHARS` constant
+- `_in_parenthetical_citation` helper
+- All persona-theater test cases under `TestAntiPatternPersonaTheater` (15 tests)
+- Caller in CPS check (`_run_cps_check`)
+
+### Retained
+
+- `_DESIGNATED_REFERENCE_FIELDS` — still passed to `_collect_free_text_fields` as `exclude_paths` so the length-budget check skips structured-reference fields. The tuple no longer powers a persona-theater veto (there is none) but documents which schema fields explicitly carry role identifiers.
+- `_check_no_freeform_brainstorm` (length budgets + connectives)
+- `_check_no_redundant_affirmation` (Levenshtein vs prior turn)
+- `_check_no_semantic_memory_mutation` (canonical-doc immutability)
+
+### Added — 4 regression tests under `TestPersonaTheaterRemoved`
+
+- `test_persona_theater_check_no_longer_callable` — function must not exist
+- `test_persona_theater_regex_helpers_removed` — supporting regexes/helpers absent
+- `test_designated_reference_fields_retained_as_documentation` — tuple kept for exclude_paths
+- `test_at_mentions_in_retro_outputs_no_longer_veto` — all v3.7.x false-positive shapes now pass
+
+### Documentation updates
+
+- `surfaces/_primitives/anti-pattern-enforcement.md` — persona-theater entry struck through; v3.8.0 implementation status documents the removal rationale + lesson on detector-shape validity
+- `CLAUDE.md` §7.12 — anti-pattern enumeration drops persona theater
+- `PLAYBOOK.md` — CPS veto recovery table drops `persona_theater_detected`
+- `.claude/agents/marep-orchestrator.md` BAO bounds — drops persona theater from enforcement list
+- `.claude/agents/retro-applier.md` — drops persona theater from anti-pattern coverage note
+- `surfaces/retro/phases/03-analysis.md` — drops persona theater from anti-pattern enforcement note
+
+### Test count: 629 (down from 639 — net -10 from 15 deleted + 4 new + 1 doc-test signature update)
+
+### Substrate-discipline lesson
+
+The anti-pattern primitive's load-bearing condition — "structural enough that a deterministic detector exists" — is sharper than it appears. When the operator can NAME a failure mode but the deterministic detector cannot distinguish it from legitimate behavior at LLM-output scale, the detector is the wrong shape and should not ship. v3.8.0 is the first substrate-anti-pattern REMOVAL; the precedent matters.
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.7.6 — marep-orchestrator synthesis_attempt budget 1000 -> 1500
 
 **Frontmatter-only calibration.** Conflict-detection mode produced consecutive payloads (10:15:44Z and 13:03:24Z dispatches on 977) where one or more `conflicts_surfaced[*].synthesis_attempt` fields overran the 1000-char budget by 20-25%. Structural reality: 4 cross-role conflicts with substantive analytical positions legitimately exceed 1000 chars when the synthesis describes WHERE positions agree and WHERE they diverge.
