@@ -4,6 +4,58 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.1 — length-budget enforcement REMOVED from `_check_no_freeform_brainstorm`
+
+**Per Aaron 2026-06-05: "Path B — Apply v3.8.0's lesson to budgets too."**
+
+After v3.8.0 closed the persona-theater whack-a-mole, the next dispatch surfaced the SAME pattern one layer down: length-budget overrun on `recommended_resolution_paths[1].rationale` (913 vs 800). Three budget calibrations in Phase 3 exit retro:
+
+| Version | Budget bump |
+|---|---|
+| v3.7.2 | summary 1500 → 2500 |
+| v3.7.6 | conflicts_surfaced[*]/synthesis_attempt 1000 → 1500 |
+| (would-have-been-v3.8.1) | recommended_resolution_paths[*]/rationale 800 → 1200 |
+
+Six other budgeted fields remained statistically inevitable next. The detector cannot distinguish "agent producing dense legitimate content" from "agent overflowing into prose" at LLM-output scale.
+
+### Changed — `_check_no_freeform_brainstorm` narrowed
+
+Length-budget enforcement removed. The check now only scans for forbidden conversational connectives (small finite structural detector: "as we discussed", "circling back", etc.).
+
+`length_budgets` keyword argument removed from the function signature. Caller updated.
+
+### Retained
+
+- Forbidden-connective scan (finite, structural, valid)
+- `length_budgets:` keys in agent frontmatter (advisory documentation; the substrate no longer reads them for veto)
+- `_agent_anti_pattern_config` still parses `length_budgets` (no behavior change to the parser; future inspection / corpus-wide audit may use the values)
+
+### Added — 5 tests under `TestAntiPatternFreeformBrainstorm`
+
+- `test_v381_length_budgets_no_longer_enforced` — long outputs that exceeded any hypothetical budget pass
+- `test_v381_length_budgets_parameter_removed` — passing the removed kwarg raises TypeError
+- `test_forbidden_connective_vetoes` — connectives still fire
+- `test_default_forbidden_connectives_applied` — default list still works
+- `test_v381_dense_content_without_connectives_passes` — real conflict-detection payload size that tripped v3.7.x now passes
+
+### Test count: 630 (up from 629)
+
+### Substrate-discipline lesson (compounding)
+
+v3.8.0 removed persona-theater because regex over free text manufactured operator decisions. v3.8.1 removes length budgets for the same reason: per-field character caps on free-text fields cannot distinguish legitimate dense content from prose drift. Both detectors satisfied the syntactic shape of "deterministic detector exists" but failed the load-bearing requirement: distinguishing the failure mode from legitimate behavior at LLM-output scale.
+
+**Two patterns of substrate detectors that work** remain in the framework:
+- Finite-enumerable structural markers (forbidden connectives; canonical-path mutation; specific contract violations like missing required_outputs)
+- Domain-typed structural distinctions (`_DESIGNATED_REFERENCE_FIELDS` as exclude_paths; semantic-memory paths; brief-confirmation flags)
+
+**Two patterns that do NOT work:**
+- Regex over free-text shape (persona theater — removed v3.8.0)
+- Numeric caps over free-text length (freeform brainstorm length budgets — removed v3.8.1)
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.0 — `_check_no_persona_theater` REMOVED
 
 **Per Aaron 2026-06-05: "lets remove it did not pay off like I hoped."**
