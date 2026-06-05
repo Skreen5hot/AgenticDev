@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.0 — persona-theater negation exemption + retro-analytical length-budget calibration
+
+**Two surgical substrate calibrations** from the Phase 3 exit retro (01-gathering → 02-merge transition).
+
+### Added — persona-theater negation-context exemption (v3.7.0a)
+
+`_check_no_persona_theater` previously vetoed any `@<RoleName>` mention in retro analytical-agent free-text — but legitimate meta-discussion of role *absence* ("evidence of `@QA` absence...", "without `@DeliveryManager` dispatched...", "did not surface a `@RiskAnalyst` finding...") was tripping the predicate. The MAREP-Orchestrator's `conflict-detection` mode in particular needs to discuss which roles were and were NOT present in a given retro instance.
+
+New regex `_PERSONA_NEGATION_CONTEXT_RE` (absence of, without, not dispatched, not surfaced, did not, haven't, hasn't, not present, missing, omit[ted], not include[d], not the/a/an, excluding, excludes, exempted, exempt, not addressed) checks a 40-char window BEFORE and AFTER each `@<RoleName>` match. If a negation keyword fires in either window, the `@`-mention is exempted from the persona-theater veto. Bidirectional lookback+lookahead covers both "absence of `@QA`" (negation before) and "`@QA` was not dispatched" (negation after).
+
+Evidence basis: `bank-944-...-1` (persona-theater veto on 944 marep-orchestrator phase-transition mode discussing absent roles in 01-gathering).
+
+### Added — retro-analytical length-budget calibration (v3.7.0b)
+
+Four agent contracts bumped to accommodate the empirically-observed legitimate content density of Phase 3 exit retro outputs:
+
+- `.claude/agents/qa.md` — `proposed_issues[*]/title`: 120 → 180; `proposed_issues[*]/rationale`: 800 → 1000
+- `.claude/agents/delivery-manager.md` — same bumps as qa
+- `.claude/agents/risk-analyst.md` — `proposed_risks[*]/title`: 120 → 180; `proposed_risks[*]/rationale`: 800 → 1000
+- `.claude/agents/marep-orchestrator.md` — `proposed_transition`: 200 → 300; `current_phase_status`: 800 → 1500; `conflicts_surfaced[*]/subject`: 200 → 250; `conflicts_surfaced[*]/synthesis_attempt`: 800 → 1000; `recommended_resolution_paths[*]/rationale`: 600 → 800; `consensus_outcomes[*]/rationale`: 600 → 800
+
+Evidence basis: `bank-942-...-1` (length-budget overruns on 940/941/942 retro analytical agents) and `bank-960-...-1` (operator-Agent prompt-discipline observation: kitchen-sink inputs prime verbose outputs that trip the prior calibration).
+
+### Added — 4 regression tests (`TestAntiPatternPersonaTheater`)
+
+- `test_v37_negation_context_absence_exempts` — "evidence of @QA absence..." (the bank-944 case verbatim)
+- `test_v37_negation_context_without_exempts` — "...without @QA dispatched..."
+- `test_v37_negation_context_not_dispatched_exempts` — "@QA was not dispatched..." (requires lookahead)
+- `test_v37_address_outside_negation_still_vetoes` — confirms non-negated `@`-mentions still fire the veto
+
+### Fixed — date-sensitive test fragility in tests/test_fixer.py
+
+`test_supersession_unwedges_stall_detector` previously hardcoded `"2026-06-04T08:00:00Z"` to construct a "recent" audit event for the stall-detector residue-exclusion filter. As wall-clock rolled to 2026-06-05, that timestamp became >24h old (stale residue) and the test's pre-supersession assertion (stall present) failed. Replaced with dynamic `datetime.now(timezone.utc) - timedelta(hours=1)`. Pre-existing test fragility; only surfaced after a date rollover. Not a v3.7-introduced regression.
+
+### Test count: 626 (up from 622)
+
+Four new persona-theater negation tests; no removals.
+
+### Dual-track sync
+
+Both repos: GraphWrite (development) and AgenticDev (template-target) carry v3.7.0.
+
 ## v3.6.0 — phantom-stall-after-recovery auto-supersession (closes the 3x-this-session pattern)
 
 **New substrate primitive.** Aaron 2026-06-04: "the service is recommending #1 but I want sustained fixed #4." Pattern hit 3 times in the 2026-06-02 → 2026-06-04 session:
