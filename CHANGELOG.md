@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.3 — vote-driven issue status computation per MAREP v2.2 §15.3
+
+**Real substrate gap.** The 04-consensus phase spec (`surfaces/retro/phases/04-consensus.md`) declared:
+
+> Status transitions are deterministic — the substrate's `retro-applier` computes the new status when votes are added. There is no LLM in the transition path.
+
+But no code path implemented it. `cmd_retro_vote` appended votes to the votes[] section + emitted an audit event, but never updated issue/risk statuses. The retro-applier consumed analytical-agent proposals but didn't compute status from votes either.
+
+Surfaced when the Phase 3 exit retro 04-consensus chain produced `transition_kind: stay` despite 21/21 confirm votes. The MAREP-orchestrator correctly refused to advance: every issue still carried `status: no-status` because no code path had computed it.
+
+### Added — `_compute_issue_status_from_votes` pure helper
+
+Per MAREP v2.2 §15.3:
+
+| Votes for issue | Computed status |
+|---|---|
+| empty | `proposed` |
+| ≥1 confirm, no reject, no contest | `confirmed` |
+| ≥1 reject, no confirm, no contest | `rejected` |
+| confirm + reject (no contest) | `contested` |
+| any contest | `contested` |
+
+### Added — `_recompute_all_issue_statuses(state)`
+
+Walks every item in `issues[]`, `risks[]`, `actions[]`; matches by `id`; recomputes status from `votes[]`. Returns count of items whose status changed. Mutates state in place.
+
+### Changed — `cmd_retro_vote`
+
+After appending the new vote, calls `_recompute_all_issue_statuses`. Saves the updated state. Prints `status recomputed: N item(s) updated` when changes fire.
+
+### Added — 3 tests under `TestRetroCommands`
+
+- `test_v383_compute_status_from_votes_helper` — pure-function table-test of all §15.3 transitions
+- `test_v383_vote_updates_issue_status_in_place` — confirm vote → issue.status='confirmed' (the gap-closure verification)
+- `test_v383_subsequent_reject_promotes_to_contested` — multi-vote interaction
+
+### Test count: 634 (up from 631)
+
+### Substrate-discipline observation
+
+Specs that describe deterministic behavior MUST be matched by code that implements it. The 04-consensus.md spec described §15.3 status transitions as substrate-enforced; v3.0 shipped without implementing them. The gap was invisible until a real retro reached 04-consensus with all-confirm votes. v3.9 candidate: corpus-wide `TestSpecBehaviorIsImplemented` walking phase specs + agent contracts for deterministic-behavior claims and validating they have corresponding code.
+
+### Daemon does NOT need restart
+
+`state_admin` is invoked per-command; the daemon doesn't cache its code. Restart only required if the daemon will dispatch retro-applier tasks that exercise the new helper (none queued in this session).
+
 ## v3.8.2 — `_recovery_dispatcher` auto_resolution path now includes `validator_report`
 
 **Real substrate bug from v3.7.5.** The auto_resolution return path I added in v3.7.5 omitted the `validator_report` key, but the recovery-dispatcher's `required_outputs` (per agent contract frontmatter) declares `[dispatched, validator_report, escalated, summary]`. CPS-vetoed in the wild on task 1008 in the Phase 3 exit retro after 977 completed cleanly under v3.8.1 and the auto_resolution path actually fired for the first time on a real Fixer output.
