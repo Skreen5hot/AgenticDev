@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.4 — retro-applier maps `consensus_outcomes[]` to `decisions[]`
+
+**Companion to v3.8.3.** After v3.8.3 fixed vote-driven issue status computation, the Phase 3 exit retro 04-consensus phase still couldn't advance: the BAO orchestrator correctly returned `transition_kind: stay` because `decisions[]` was empty per the spec's third exit criterion.
+
+The marep-orchestrator's consensus-summary mode contract emits `consensus_outcomes[]` (per `.claude/agents/marep-orchestrator.md` mode-specific required_outputs). The retro-applier's `_retro_collect_proposals` accepted `proposed_issues`, `proposed_actions`, `proposed_risks`, `proposed_votes`, `proposed_decisions` — but NOT `consensus_outcomes`. Contract mismatch between the orchestrator and the applier.
+
+### Fix
+
+`_retro_collect_proposals` extended:
+
+```python
+for sec, key in (
+    ("issues", "proposed_issues"),
+    ("actions", "proposed_actions"),
+    ("risks", "proposed_risks"),
+    ("votes", "proposed_votes"),
+    ("decisions", "proposed_decisions"),
+    ("decisions", "consensus_outcomes"),  # v3.8.4
+):
+```
+
+When a `consensus_outcome` lacks an `@id` / `id` but has `issue_id`, the applier synthesizes `@id: f"decision-{issue_id}"` so the idempotency check works on re-dispatch.
+
+### Added — 2 regression tests
+
+- `test_v384_consensus_outcomes_merge_into_decisions` — the bank-977-ish gap: consensus_outcomes flow into decisions[]
+- `test_v384_consensus_outcomes_preserve_existing_id` — when an outcome already has @id, applier doesn't clobber it
+
+### Test count: 636 (up from 634)
+
+### Substrate-discipline observation
+
+Same pattern as v3.8.3 (spec described behavior; implementation gap). The contract between two ratified shapes (marep-orchestrator consensus-summary required_outputs + retro-applier inputs schema) was not validated at substrate-build time. v3.9 candidate (now cumulative): `TestSpecBehaviorIsImplemented` should also include `TestAgentContractConsumerCompatibility` — when agent A emits a field declared in its required_outputs and agent B consumes that field per its inputs schema, the substrate must validate at-rest that B knows how to handle A's output keys.
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.3 — vote-driven issue status computation per MAREP v2.2 §15.3
 
 **Real substrate gap.** The 04-consensus phase spec (`surfaces/retro/phases/04-consensus.md`) declared:
