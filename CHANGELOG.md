@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.5 — Fixer auto_resolution; dispatcher honors no-execution-required without escalating
+
+**Per Aaron 2026-06-05: "Help me understand why I need to keep making all these decisions? use the current one as an example. I do not see the value I am adding."**
+
+The substrate-discipline gap: the Fixer's contract has only a binary `escalate: true | false`. There's no way to express **"I'm escalating because there's no recovery_chain to run, but the answer is auto-resolvable — no operator judgment needed."** Every Fixer that produced a "no action needed" recommendation forced an operator decision that was truly trivial. Concrete example from this session: race-orphan dispatchers (979/980, 989/990, ... up to 999/1000) all surfaced "no action needed" recommendations as fake operator decisions.
+
+### Added — Fixer `outputs.auto_resolution` field (optional)
+
+```json
+{
+  "outputs": {
+    "escalate": true,
+    "auto_resolution": {
+      "execution_mode": "no-execution-required",
+      "reason": "race-with-operator-reset; anchor already healthy"
+    },
+    "recommendation": "...",
+    "options": [...]
+  }
+}
+```
+
+The Fixer opts into auto-resolution by populating `auto_resolution`. Only `execution_mode: "no-execution-required"` is honored auto-resolved in v3.7.5 (other modes require additional payload the Fixer cannot construct without operator authority).
+
+### Changed — `_recovery_dispatcher` behavior
+
+Before the existing escalate path, the dispatcher now checks for a well-formed `auto_resolution: {execution_mode: "no-execution-required", reason: "<non-empty>"}`. When present, the dispatcher returns:
+
+```json
+{
+  "dispatched": 0,
+  "escalated": false,
+  "auto_resolved": true,
+  "execution_mode": "no-execution-required",
+  "reason": "<fixer's reason>",
+  "summary": "Fixer self-classified as auto-resolvable (...); no operator surface emitted."
+}
+```
+
+Daemon commits with `status=done`. No `awaiting_operator_decision`. No operator surface.
+
+### Backward compatibility
+
+Fixer outputs without `auto_resolution` use the existing escalate path verbatim. Existing chains and tests unchanged.
+
+### Added — 4 regression tests under `TestRecoveryDispatcher`
+
+- `test_v375_auto_resolution_no_execution_required_skips_escalation` — happy path: well-formed declaration → no operator surface
+- `test_v375_auto_resolution_missing_reason_falls_through` — shape validation: missing reason → fall through to escalate
+- `test_v375_auto_resolution_unsupported_mode_falls_through` — only no-execution-required honored; state-surgery-applied / manual-followup-queued still escalate
+- `test_v375_no_auto_resolution_legacy_behavior_unchanged` — backward-compat: no `auto_resolution` field → existing escalate path
+
+### Test count: 639 (up from 635)
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.7.4 — cascading-decisions gap: extend already-pending check to recovery-dispatcher
 
 **Per Aaron 2026-06-05: "the decisions are getting ahead of my ability to understand. fix the substrate so the stop does not happen again."**
