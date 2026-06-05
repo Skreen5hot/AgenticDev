@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.7.4 — cascading-decisions gap: extend already-pending check to recovery-dispatcher
+
+**Per Aaron 2026-06-05: "the decisions are getting ahead of my ability to understand. fix the substrate so the stop does not happen again."**
+
+The substrate-discipline gap: `_try_auto_fixer_dispatch`'s `already_pending` guard checked only `agent == "fixer"` and skipped tasks whose status was in `("done", "abandoned")`. But Fixer tasks complete fast to `status=done`, so the check passed on the next daemon cycle even when the recovery-dispatcher spawned by the prior Fixer was sitting in `awaiting_operator_decision`.
+
+Sequence that produced the cascade observed during the Phase 3 exit retro 03-analysis dispatch cycle (anchor 977):
+
+1. 977 blocked → daemon queued Fixer 985 + dispatcher 986
+2. Fixer 985 completed quickly to `done`; dispatcher 986 became `awaiting_operator_decision`
+3. Next daemon cycle: 977 still blocked → `already_pending` walked `agent=fixer` matching anchor → Fixer 985 is `done` → skipped → `already_pending=False`
+4. Daemon queued Fixer 987 + dispatcher 988
+5. Loop continued: 989/990, 991/992, 993/994, 995/996, 997/998 — six redundant decisions over <90 minutes
+
+### Fix
+
+`_try_auto_fixer_dispatch` now walks `agent in ("fixer", "recovery-dispatcher")`. The existing `status in ("done", "abandoned")` skip lets `awaiting_operator_decision` match — that's exactly the case we want to detect.
+
+```python
+for t in state.get("tasks", []) or []:
+    if t.get("agent") not in ("fixer", "recovery-dispatcher"):
+        continue
+    if t.get("status") in ("done", "abandoned"):
+        continue
+    t_inputs = t.get("inputs") or {}
+    if t_inputs.get("anchor_task") == anchor_id:
+        already_pending = True
+        break
+```
+
+Result: while a recovery-dispatcher for an anchor is in `awaiting_operator_decision`, the daemon will NOT queue another (fixer, dispatcher) pair for the same anchor. Once the operator resolves the open dispatcher (to `done`), the gate opens for a fresh dispatch if the anchor is still blocked.
+
+### Added — 2 regression tests
+
+- `test_v374_awaiting_dispatcher_prevents_double_dispatch` — the bank-977-2 case verbatim: completed Fixer + awaiting dispatcher → no fresh dispatch
+- `test_v374_completed_dispatcher_does_not_block_dispatch` — over-block guard: resolved Fixer + done dispatcher → fresh dispatch proceeds
+
+### Test count: 635 (up from 633)
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.7.3 — persona-theater parenthetical-citation exemption
 
 **Third surgical persona-theater exemption** this retro cycle, completing the v3.7 calibration cluster. Per Aaron's "find the gaps and close them, as we build" directive — each escape pattern that surfaces during real dispatches yields a substrate amendment.
