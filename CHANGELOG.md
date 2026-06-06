@@ -4,6 +4,82 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.9.0 — PO Review Cycle Primitive (ADR-012)
+
+**Per Aaron 2026-06-06: "The outstanding part of this Barcode system is review clarity. What do we need to do to create a clear cycle. Ideally with the Barcode System."**
+
+Phase 4 PO review of the Mermaid emit format required four chat-mediated iterations. Each round was prose-spec-then-byte-drift: ADR-011 captured the format in prose; the developer "looked right" but wasn't; tests asserted structural shape that passed on wrong output; only when the byte-equality golden landed (commit 1921ed5) did the drift get caught structurally. **Prose specs drift; byte goldens don't.** v3.9.0 generalizes the byte-golden pattern as a substrate primitive.
+
+### Added — `po_feedback` audit event (data layer)
+
+New first-class audit event type recording one round of PO feedback at byte-quote granularity:
+
+```json
+{
+  "event": "po_feedback",
+  "payload": {
+    "phase_id": "phase-4",
+    "iteration_n": 3,
+    "anchor_task": "urn:fnsr:task:...",
+    "observed_quote": "N0[\"mamam:ont00001262<br>...\"]",
+    "expected_quote": "N0[&quot;mama:Person<br>...&quot;]",
+    "gap_classification": "spec-side",
+    "gap_description": "emitter uses IRI fragment + bare quotes",
+    "remediation": "subject-fix",
+    "operator": "...",
+    "notes": "...optional...",
+    "observed_source": "...optional..."
+  }
+}
+```
+
+Chain-hashed via existing `hiri_sign`. Anchored on operator-named task (typically the phase's demo-released anchor).
+
+### Added — `state_admin po-feedback` CLI
+
+```
+state_admin po-feedback <phase-id> \
+    --anchor-task <id> \
+    --observed-quote "..." \
+    --expected-quote "..." \
+    --gap "..." \
+    --gap-classification {data-side|spec-side|verification-side} \
+    --remediation {substrate-fix|subject-fix|spec-amendment|discipline-correction} \
+    [--observed-source ...] [--notes ...] [--operator ...]
+```
+
+Iteration counter auto-computed: walks state for prior `po_feedback` events matching `phase_id`; next event gets `iteration_n = count + 1`. Independent counters per phase.
+
+### Added — `fnsr_chain_validator.py` PRED-7 (enforcement layer)
+
+`pred_7_operator_golden_for_format_spec`: developer tasks targeting `src/emit/`, `src/validate/`, or `src/format/` paths MUST declare `inputs.operator_golden_path` pointing at a `test/golden/*` fixture. Detection via `inputs.target_paths` list OR fallback substring scan of `inputs.purpose`.
+
+`state_admin append-tasks --verify-first` refuses chains that violate. **The architect cannot ratify a format-spec change until the operator's byte-equality golden is declared as a chain input** — structural enforcement of the operator-authored-golden discipline.
+
+### Added — ADR-012 in `project/DECISIONS.md`
+
+`PO Review Cycle Primitive`. Decision: structured `po_feedback` events + PRED-7 + iteration counter + CLI ergonomics. Context: Phase 4 Mermaid drift pattern; "prose specs drift, byte goldens don't" lesson. Consequences enumerated.
+
+### Added — 11 regression tests
+
+- 5 under `TestPoFeedbackCommand` (event shape, iteration counter, per-phase independence, validation rejections)
+- 5 under PRED-7 expansion of `TestPredicateValidator` (target_paths trigger; purpose-substring fallback; passes-when-declared; non-format-targets-skip; full validator report)
+- 1 ADR shape test (deferred to v3.9.1; doc only)
+
+### Test count: 659 (up from 648)
+
+### Deferred to v3.9.1
+
+The visibility surface — `fnsr.po_review.md` (parallel to `fnsr.status.md`) showing current iteration + open feedback items + recent landings — ships in v3.9.1. v3.9.0 ships the data layer (event), the enforcement (PRED-7), and the operator CLI.
+
+### Substrate-discipline impact
+
+For all future format-spec phases (Phase 5 persistence emit paths; Phase 6 starter content), the PO review cycle is no longer chat-mediated. Operator records `po_feedback`; chain composer cannot bypass PRED-7; architect ratifies against a declared byte fixture, not against prose. **Drift becomes structurally impossible.**
+
+### Daemon restart required
+
+Code change to `fnsr_chain_validator.py` (imported by `state_admin.py`); CLI changes need re-import.
+
 ## v3.8.8 — applier preserves developer-authored line endings on Windows
 
 **Real substrate gap surfaced in Phase 4 Chain 2 recovery cycle (task 1047).** The applier's two `Path.write_text(...)` calls (lines 1269 create-mode and 1329 edit-mode) didn't pass `newline=""`. Python's default `newline=None` translates `"\n"` to `os.linesep` on write — CRLF on Windows. Developer-authored LF was silently converted to CRLF on disk, breaking byte-equality goldens.
