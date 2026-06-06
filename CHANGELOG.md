@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.6 — phantom-stall supersession extended to applier-success (docs-only recovery)
+
+**Companion to v3.6.0.** v3.6.0 closed the phantom-stall-after-recovery pattern for code chains (recovery ends with `test-runner all_pass`). Docs-only recovery chains end with `applier` success (no tests to run) — v3.6.0's check missed them. Surfaced on task 1021 during the OED-313 closure: brief-confirmation chain (1028 developer → 1029 mojibake-repair → 1030 applier-brief) succeeded; 1021 stayed `status=blocked`.
+
+### Changed — `_maybe_supersede_recovery_anchor`
+
+Refactored to handle two trigger kinds:
+
+| Trigger | Conditions |
+|---|---|
+| `test-runner-allpass` (v3.6.0) | `completed.agent == "test-runner"` AND `outputs.status == "all_pass"` |
+| `applier-success-docs-only` (v3.8.6) | `completed.agent == "applier"` AND no `error` AND `failed: []` AND no downstream test-runner sibling in same `recovery_anchor` group |
+
+The downstream-test-runner check prevents premature supersession when a recovery chain has BOTH applier and test-runner (defers to v3.6.0 path). Idempotency check (`anchor.status != "blocked"`) still terminates any duplicate fire.
+
+### Added — 3 regression tests under `TestRecoveryAnchorAutoSupersession`
+
+- `test_v386_applier_success_supersedes_docs_only_recovery` — the 1021 case verbatim
+- `test_v386_applier_with_failures_does_not_supersede` — partial-failure shape must not trigger
+- `test_v386_applier_defers_to_test_runner_when_sibling_exists` — applier success with pending test-runner sibling defers
+
+### Test count: 642 (up from 639)
+
+### Substrate-discipline lesson (compounding)
+
+This is the second v3.x.x patch this session that extends a v3.6.0-era safeguard to a path the original implementation didn't anticipate. Same shape as v3.8.4 (retro-applier didn't know about consensus_outcomes) and v3.8.5 (CPS check didn't know about in-batch ADR additions). Pattern: substrate primitives shipped against a specific recovery shape; later real-world recoveries surface adjacent shapes that need the same treatment. v3.9 candidate compounded again: `TestRecoveryShapeCoverage` — for each recovery-completion path (test-runner, applier, future system agents), assert the supersession hook fires correctly.
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.5 — in-batch ADR additions count as valid citations
 
 **Substrate gap surfaced during OED-313 closure chain.** The developer task (1019) proposed a coherent change set for OED-313 resolution: add ADR-010 to DECISIONS.md AND update SPEC.md / ROADMAP.md with cross-references to ADR-010. The CPS check `_check_adr_citations_in_after` vetoed because the on-disk DECISIONS.md didn't yet contain ADR-010 (it was being added in the same batch).
