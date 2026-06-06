@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.8 — applier preserves developer-authored line endings on Windows
+
+**Real substrate gap surfaced in Phase 4 Chain 2 recovery cycle (task 1047).** The applier's two `Path.write_text(...)` calls (lines 1269 create-mode and 1329 edit-mode) didn't pass `newline=""`. Python's default `newline=None` translates `"\n"` to `os.linesep` on write — CRLF on Windows. Developer-authored LF was silently converted to CRLF on disk, breaking byte-equality goldens.
+
+Surfaced when Phase 4 Chain 2 brief-confirmation chain landed `tests/golden/manifest.jsonld` with CRLF line endings, but the byte-equality test (AC6) expected LF. Fixer 1048 diagnosed the issue and recommended both immediate-unblock (test relaxation) AND substrate fix.
+
+### Fix
+
+Two `write_text` calls now pass `newline=""`:
+
+```python
+file_path.write_text(content_to_write, encoding="utf-8", newline="")
+file_path.write_text(new_content, encoding="utf-8", newline="")
+```
+
+This is universal: every file the applier touches on any platform now preserves the developer's authored line endings exactly. No more silent CRLF normalization.
+
+### Added — 2 regression tests under `TestV388LinendingPreservation`
+
+- `test_v388_create_preserves_lf` — new-file create path: LF in `after` → LF on disk
+- `test_v388_edit_preserves_lf` — edit path: same guarantee
+
+Tests read raw bytes (not text) to verify line-ending preservation.
+
+### Test count: 648 (up from 646)
+
+### Substrate-discipline lesson
+
+Python's `Path.write_text` default behavior is platform-aware in a way that breaks byte-equality contracts the substrate is supposed to honor. The substrate has been silently corrupting line endings since the applier first shipped (v2.6.0); the gap was invisible until byte-equality goldens became load-bearing in Phase 4.
+
+v3.9 candidate cumulative: `TestApplierByteFidelity` — for every applier output path, assert the on-disk bytes match the developer's authored bytes exactly (no encoding translation, no line-ending translation, no BOM mutation beyond the explicit BOM-prepend on new files).
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.7 — test-runner surfaces `status=errors/failures` as structured error
 
 **Real substrate gap.** Surfaced during Phase 4 Chain 2 test-runner (1042): TS compile error in `src/manifest/build.ts:90` failed `npm run build:tests` with exit_code=2; test-runner reported `status=errors` with passed=0/failed=0/total=0. But because the structured outputs were complete and no `error` field was set, the CPS check passed and the task went `status=done`. **Build failure invisible to the stall detector.** The Fixer was never auto-dispatched.
