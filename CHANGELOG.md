@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.5 — in-batch ADR additions count as valid citations
+
+**Substrate gap surfaced during OED-313 closure chain.** The developer task (1019) proposed a coherent change set for OED-313 resolution: add ADR-010 to DECISIONS.md AND update SPEC.md / ROADMAP.md with cross-references to ADR-010. The CPS check `_check_adr_citations_in_after` vetoed because the on-disk DECISIONS.md didn't yet contain ADR-010 (it was being added in the same batch).
+
+The check correctly enforced the "ADR-NNN ghost" guarantee — but it didn't recognize that the citation target IS being added in the same coherent change set.
+
+### Added — `_collect_in_batch_adr_additions(changes)`
+
+Scans `changes[*].after` content destined for the ADR registry file (DECISIONS.md) for new `## ADR-NNN:` headers. Returns the set of NNN strings being added in this batch.
+
+Only headers in changes destined for DECISIONS.md itself count. A header appearing in a change to SPEC.md or ROADMAP.md is a quote/reference, not an addition.
+
+### Changed — `_check_adr_citations`
+
+Effective registry = on-disk registry ∪ in-batch additions. Citations valid against either source pass; citations against neither veto.
+
+### Added — 3 regression tests under `TestCheckAdrCitations`
+
+- `test_v385_in_batch_new_adr_satisfies_cross_references` — the OED-313 case verbatim (ADR-099 added in C1, cited in C2/C3)
+- `test_v385_in_batch_addition_only_in_decisions_md` — negative: `## ADR-NNN:` in a SPEC.md change doesn't count as an addition
+- `test_v385_invalid_citation_still_fires_with_in_batch_addition` — citing a different non-existent ADR still vetoes (the in-batch addition only covers itself)
+
+### Test count: 639 (up from 636)
+
+### Substrate-discipline lesson (compounding)
+
+Yet another "spec/intent described coherent behavior; implementation enforced part of it too strictly" gap. v3.9 candidate cumulative now includes a third: `TestCanonicalDocCheckHonorsBatchSemantics` — for every CPS check that validates content against canonical-doc state, verify the check accepts changes-in-the-same-batch as if they were already applied.
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.4 — retro-applier maps `consensus_outcomes[]` to `decisions[]`
 
 **Companion to v3.8.3.** After v3.8.3 fixed vote-driven issue status computation, the Phase 3 exit retro 04-consensus phase still couldn't advance: the BAO orchestrator correctly returned `transition_kind: stay` because `decisions[]` was empty per the spec's third exit criterion.
