@@ -4,6 +4,55 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## v3.8.7 — test-runner surfaces `status=errors/failures` as structured error
+
+**Real substrate gap.** Surfaced during Phase 4 Chain 2 test-runner (1042): TS compile error in `src/manifest/build.ts:90` failed `npm run build:tests` with exit_code=2; test-runner reported `status=errors` with passed=0/failed=0/total=0. But because the structured outputs were complete and no `error` field was set, the CPS check passed and the task went `status=done`. **Build failure invisible to the stall detector.** The Fixer was never auto-dispatched.
+
+### Changed — `_test_runner`
+
+When the computed status is `"errors"` or `"failures"`, set `outputs.error` to a meaningful slug:
+
+```python
+if status == "errors":
+    outputs["error"] = "test_runner_errors"
+elif status == "failures":
+    outputs["error"] = "test_runner_failures"
+```
+
+CPS check now vetoes on the structured-error envelope. Task transitions to `status=blocked`. Stall detector picks it up. Fixer auto-dispatches.
+
+### Changed — `_stalls_eligible_for_fixer` classifier
+
+Added explicit branches for the new slugs:
+
+```python
+elif err == "test_runner_errors":
+    stall_kind = "test_runner_errors"
+elif err == "test_runner_failures":
+    stall_kind = "test_runner_failures"
+```
+
+Legacy branch (checking `outputs.status == "errors" and outputs.returncode is None`) retained for backward compatibility but noted as never-fired-in-practice (the field is `exit_code` not `returncode`; the existing branch was a latent bug).
+
+### Added — 4 regression tests under `TestV387StructuredErrorEnvelope`
+
+- `test_v387_errors_status_sets_outputs_error` — build failure → `outputs.error = "test_runner_errors"`
+- `test_v387_failures_status_sets_outputs_error` — test failure → `outputs.error = "test_runner_failures"`
+- `test_v387_all_pass_no_error_field` — green path: outputs.error absent
+- `test_v387_stall_classifier_recognizes_test_runner_errors` — blocked task with new slug → classified `test_runner_errors`
+
+### Test count: 646 (up from 642)
+
+### Substrate-discipline lesson (compounding)
+
+Pre-v3.8.7 a system agent could return `WorkerResult(True, outputs)` where the substantive content indicated failure (`status="errors"`, `exit_code=2`) but the structural envelope was complete. CPS check then passed because it only inspects the envelope, not the semantic content. The substrate trusted the envelope; the envelope lied. Pattern: **structural success can mask semantic failure when the structural envelope doesn't encode the failure mode.**
+
+v3.9 candidate compounded: `TestSystemAgentSemanticConformsToStructural` — for each system agent, walk its return paths and assert that semantic-failure outputs (e.g., test-runner status≠all_pass; applier failed≠[]) MUST set `outputs.error` so CPS vetoes.
+
+### Daemon restart required
+
+Code change to `fnsr_daemon.py`; not frontmatter-only.
+
 ## v3.8.6 — phantom-stall supersession extended to applier-success (docs-only recovery)
 
 **Companion to v3.6.0.** v3.6.0 closed the phantom-stall-after-recovery pattern for code chains (recovery ends with `test-runner all_pass`). Docs-only recovery chains end with `applier` success (no tests to run) — v3.6.0's check missed them. Surfaced on task 1021 during the OED-313 closure: brief-confirmation chain (1028 developer → 1029 mojibake-repair → 1030 applier-brief) succeeded; 1021 stayed `status=blocked`.
